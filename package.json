@@ -1,0 +1,20 @@
+{
+  "name": "suivi-prospection",
+  "version": "1.0.0",
+  "description": "Suivi de prospection MLM - Layer 1 (pipeline, historique d'etapes, relances, benchmark de conversion)",
+  "main": "server.js",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "reset-password": "node scripts/reset-password.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "cookie-parser": "^1.4.7",
+    "express": "^5.2.1"
+  }
+}

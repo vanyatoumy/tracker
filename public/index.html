@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Suivi Prospection</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=Montserrat+Alternates:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ============ AUTH SCREEN ============ -->
+<div id="authScreen" class="auth-screen">
+  <div class="auth-card">
+    <div class="brand-mark large">SP</div>
+    <h1 class="auth-title">Suivi Prospection</h1>
+    <p class="auth-sub">Construis en silence. Arrive en force.</p>
+
+    <div class="auth-tabs">
+      <button class="auth-tab-btn active" data-auth="login">Connexion</button>
+      <button class="auth-tab-btn" data-auth="register">Creer un compte</button>
+    </div>
+
+    <form id="loginForm" class="auth-form">
+      <label>Numero (avec indicatif)
+        <input type="tel" name="phone" required placeholder="+237677123456">
+      </label>
+      <label>Mot de passe
+        <input type="password" name="password" required>
+      </label>
+      <p class="auth-error" id="loginError"></p>
+      <button type="submit" class="btn-primary full">Se connecter</button>
+    </form>
+
+    <form id="registerForm" class="auth-form hidden">
+      <label>Nom complet
+        <input type="text" name="name" required placeholder="ex: Tony Mbarga">
+      </label>
+      <label>Numero (avec indicatif)
+        <input type="tel" name="phone" required placeholder="+237677123456">
+      </label>
+      <label>Mot de passe
+        <input type="password" name="password" required minlength="6" placeholder="6 caracteres minimum">
+      </label>
+      <p class="auth-error" id="registerError"></p>
+      <button type="submit" class="btn-primary full">Creer mon compte</button>
+    </form>
+  </div>
+</div>
+
+<!-- ============ MAIN APP (hidden until authenticated) ============ -->
+<div id="app" class="hidden">
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark">SP</span>
+    <div class="brand-text">
+      <h1>Suivi Prospection</h1>
+      <p class="brand-sub">Construis en silence. Arrive en force.</p>
+    </div>
+  </div>
+  <nav class="tabs">
+    <button class="tab-btn active" data-view="board">Pipeline</button>
+    <button class="tab-btn" data-view="stats">Statistiques</button>
+    <button class="tab-btn" data-view="archived">Archives</button>
+  </nav>
+  <div class="topbar-right">
+    <button id="addProspectBtn" class="btn-primary">+ Nouveau contact</button>
+    <button id="logoutBtn" class="btn-ghost" title="Deconnexion">⏻</button>
+  </div>
+</header>
+
+<div id="reminderBar" class="reminder-bar hidden">
+  <span id="reminderText"></span>
+  <button id="reminderDismiss" class="reminder-dismiss">&times;</button>
+</div>
+
+<!-- ============ FILTER BAR ============ -->
+<div id="filterBar" class="filter-bar">
+  <input type="text" id="filterSearch" placeholder="Rechercher un nom ou numero...">
+  <select id="filterSource">
+    <option value="">Toutes les sources</option>
+  </select>
+  <select id="filterInterest">
+    <option value="">Tous les interets</option>
+    <option value="produit">Produit</option>
+    <option value="opportunite">Opportunite</option>
+    <option value="indecis">Indecis</option>
+  </select>
+  <select id="filterCountry">
+    <option value="">Tous les pays</option>
+  </select>
+  <input type="text" id="filterCity" placeholder="Ville...">
+  <button id="clearFilters" class="btn-ghost">Effacer</button>
+</div>
+
+<main>
+  <!-- BOARD VIEW -->
+  <section id="boardView" class="view">
+    <div class="board" id="board">
+      <!-- columns injected by app.js -->
+    </div>
+  </section>
+
+  <!-- STATS VIEW -->
+  <section id="statsView" class="view hidden">
+    <div class="stats-grid">
+      <div class="stat-card highlight">
+        <p class="stat-label">Temps median avant conversion</p>
+        <p class="stat-value" id="statMedian">—</p>
+        <p class="stat-note" id="statMedianNote">Base sur les contacts devenus clients / partenaires</p>
+      </div>
+      <div class="stat-card">
+        <p class="stat-label">Conversions enregistrees</p>
+        <p class="stat-value" id="statCount">—</p>
+      </div>
+      <div class="stat-card">
+        <p class="stat-label">Le plus rapide</p>
+        <p class="stat-value" id="statMin">—</p>
+      </div>
+      <div class="stat-card">
+        <p class="stat-label">Le plus long</p>
+        <p class="stat-value" id="statMax">—</p>
+      </div>
+    </div>
+
+    <h2 class="section-title">Repartition par pays</h2>
+    <p class="section-hint">Pour savoir ou se trouve ton downline en dehors du Cameroun.</p>
+    <div class="table-wrap">
+      <table id="countryTable">
+        <thead>
+          <tr><th>Pays</th><th>Total</th><th>Convertis</th><th>Taux de conversion</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <h2 class="section-title" style="margin-top:28px;">Sources de prospection</h2>
+    <div class="table-wrap">
+      <table id="sourceTable">
+        <thead>
+          <tr><th>Source</th><th>Total</th><th>Convertis</th><th>Taux de conversion</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ARCHIVED VIEW -->
+  <section id="archivedView" class="view hidden">
+    <div class="archived-list" id="archivedList"></div>
+  </section>
+</main>
+
+<!-- ADD PROSPECT MODAL -->
+<div id="addModal" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>Nouveau contact</h2>
+      <button class="modal-close" data-close>&times;</button>
+    </div>
+    <form id="addForm">
+      <label>Nom
+        <input type="text" name="name" required placeholder="ex: Marie Ngo">
+      </label>
+
+      <label>Telephone
+        <div class="phone-row">
+          <select name="phone_dial" id="addPhoneDial"></select>
+          <input type="tel" name="phone_local" placeholder="677123456">
+        </div>
+      </label>
+
+      <div class="field-group-title">Localisation (optionnel)</div>
+      <label>Pays
+        <select name="country" id="addCountry"></select>
+      </label>
+      <div class="two-col">
+        <label>Ville
+          <input type="text" name="city" placeholder="ex: Douala">
+        </label>
+        <label>Quartier
+          <input type="text" name="quarter" placeholder="ex: Bonamoussadi">
+        </label>
+      </div>
+
+      <label>Source
+        <select name="source">
+          <option value="">— Choisir —</option>
+          <option value="referral">Recommandation</option>
+          <option value="facebook">Facebook</option>
+          <option value="instagram">Instagram</option>
+          <option value="whatsapp_status">Statut WhatsApp</option>
+          <option value="evenement">Evenement</option>
+          <option value="approche_directe">Approche directe</option>
+          <option value="autre">Autre</option>
+        </select>
+      </label>
+      <label>Type d'interet
+        <select name="interest_type">
+          <option value="indecis">Indecis</option>
+          <option value="produit">Produit</option>
+          <option value="opportunite">Opportunite (business)</option>
+        </select>
+      </label>
+      <label>Prochaine relance
+        <input type="datetime-local" name="next_followup_at">
+      </label>
+      <button type="submit" class="btn-primary full">Ajouter au pipeline</button>
+    </form>
+  </div>
+</div>
+
+<!-- PROSPECT DETAIL MODAL -->
+<div id="detailModal" class="modal-overlay hidden">
+  <div class="modal modal-wide">
+    <div class="modal-header">
+      <div>
+        <h2 id="detailName">—</h2>
+        <p class="detail-sub" id="detailSub">—</p>
+      </div>
+      <div class="modal-header-actions">
+        <a id="detailWaBtn" class="btn-whatsapp hidden" href="#" target="_blank" rel="noopener">💬 Contacter sur WhatsApp</a>
+        <button class="modal-close" data-close>&times;</button>
+      </div>
+    </div>
+
+    <div class="detail-body">
+      <div class="detail-main">
+        <div class="stage-actions" id="stageActions"></div>
+
+        <h3>Coordonnees</h3>
+        <div class="field-row">
+          <label>Telephone
+            <div class="phone-row">
+              <select id="detailPhoneDial"></select>
+              <input type="tel" id="detailPhoneLocal" placeholder="677123456">
+            </div>
+          </label>
+        </div>
+        <div class="two-col">
+          <label>Pays
+            <select id="detailCountry"></select>
+          </label>
+          <label>Ville
+            <input type="text" id="detailCity">
+          </label>
+        </div>
+        <div class="field-row">
+          <label style="flex:1">Quartier
+            <input type="text" id="detailQuarter">
+          </label>
+          <label style="flex:1">Prochaine relance
+            <input type="datetime-local" id="detailFollowup">
+          </label>
+        </div>
+        <button id="saveDetails" class="btn-ghost">Enregistrer les coordonnees</button>
+
+        <h3>Ajouter une interaction</h3>
+        <form id="interactionForm">
+          <select name="type">
+            <option value="message">Message</option>
+            <option value="appel">Appel</option>
+            <option value="rencontre">Rencontre</option>
+            <option value="note">Note</option>
+          </select>
+          <textarea name="content" placeholder="Ce qui a ete dit / observe..." required></textarea>
+          <button type="submit" class="btn-primary">Enregistrer l'interaction</button>
+        </form>
+
+        <h3>Historique des interactions</h3>
+        <div id="interactionsList" class="interactions-list"></div>
+      </div>
+
+      <div class="detail-side">
+        <h3>Chronologie des etapes</h3>
+        <div id="historyTimeline" class="history-timeline"></div>
+
+        <button id="archiveBtn" class="btn-danger full">Marquer comme perdu</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div><!-- #app -->
+
+<script src="countries.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

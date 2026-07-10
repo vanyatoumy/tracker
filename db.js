@@ -1,0 +1,478 @@
+const { DatabaseSync } = require('node:sqlite');
+const path = require('path');
+const fs = require('fs');
+const crypto = require('crypto');
+const { randomUUID } = crypto;
+
+const DB_PATH = path.join(__dirname, 'data', 'tracker.db');
+fs.mkdirSync(path.join(__dirname, 'data'), { recursive: true });
+
+const db = new DatabaseSync(DB_PATH);
+db.exec('PRAGMA foreign_keys = ON;');
+
+// ============================================
+// SCHEMA
+// ============================================
+db.exec(`
+CREATE TABLE IF NOT EXISTS users (
+    id              TEXT PRIMARY KEY,
+    name            TEXT NOT NULL,
+    phone           TEXT NOT NULL UNIQUE,   -- E.164, used as login identifier
+    password_hash   TEXT NOT NULL,
+    password_salt   TEXT NOT NULL,
+    created_at      TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    token           TEXT PRIMARY KEY,
+    user_id         TEXT NOT NULL,
+    created_at      TEXT NOT NULL,
+    expires_at      TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS prospects (
+    id              TEXT PRIMARY KEY,
+    owner_id        TEXT NOT NULL,
+    name            TEXT NOT NULL,
+    phone           TEXT,                    -- E.164 format, e.g. +237677123456
+    country         TEXT,
+    city            TEXT,
+    quarter         TEXT,
+    stage           TEXT NOT NULL CHECK (stage IN (
+                        'nouveau', 'contacte', 'interesse',
+                        'en_decision', 'client_partenaire'
+                    )),
+    stage_updated_at TEXT NOT NULL,
+    source          TEXT,
+    interest_type   TEXT CHECK (interest_type IN ('produit', 'opportunite', 'indecis') OR interest_type IS NULL),
+    outcome_type    TEXT CHECK (outcome_type IN ('produit', 'partenaire') OR outcome_type IS NULL),
+    is_archived     INTEGER NOT NULL DEFAULT 0,
+    next_followup_at TEXT,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_prospects_owner ON prospects(owner_id);
+CREATE INDEX IF NOT EXISTS idx_prospects_stage ON prospects(stage);
+CREATE INDEX IF NOT EXISTS idx_prospects_archived ON prospects(is_archived);
+CREATE INDEX IF NOT EXISTS idx_prospects_followup ON prospects(next_followup_at);
+CREATE INDEX IF NOT EXISTS idx_prospects_country ON prospects(country);
+
+CREATE TABLE IF NOT EXISTS stage_history (
+    id              TEXT PRIMARY KEY,
+    prospect_id     TEXT NOT NULL,
+    from_stage      TEXT,
+    to_stage        TEXT NOT NULL,
+    changed_at      TEXT NOT NULL,
+    note            TEXT,
+    FOREIGN KEY (prospect_id) REFERENCES prospects(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_stage_history_prospect ON stage_history(prospect_id);
+CREATE INDEX IF NOT EXISTS idx_stage_history_to_stage ON stage_history(to_stage);
+
+CREATE TABLE IF NOT EXISTS interactions (
+    id              TEXT PRIMARY KEY,
+    prospect_id     TEXT NOT NULL,
+    type            TEXT NOT NULL CHECK (type IN ('appel', 'message', 'rencontre', 'note')),
+    content         TEXT NOT NULL,
+    created_at      TEXT NOT NULL,
+    FOREIGN KEY (prospect_id) REFERENCES prospects(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_interactions_prospect ON interactions(prospect_id);
+
+CREATE TRIGGER IF NOT EXISTS trg_update_stage_timestamp
+AFTER INSERT ON stage_history
+BEGIN
+    UPDATE prospects
+    SET stage = NEW.to_stage,
+        stage_updated_at = NEW.changed_at,
+        updated_at = NEW.changed_at
+    WHERE id = NEW.prospect_id;
+END;
+`);
+
+const STAGES = ['nouveau', 'contacte', 'interesse', 'en_decision', 'client_partenaire'];
+
+function now() {
+    return new Date().toISOString();
+}
+
+// ============================================
+// AUTH: password hashing (built-in crypto, no native deps)
+// ============================================
+function hashPassword(password) {
+    const salt = crypto.randomBytes(16).toString('hex');
+    const hash = crypto.scryptSync(password, salt, 64).toString('hex');
+    return { salt, hash };
+}
+
+function verifyPassword(password, salt, expectedHash) {
+    const testHash = crypto.scryptSync(password, salt, 64).toString('hex');
+    const a = Buffer.from(testHash, 'hex');
+    const b = Buffer.from(expectedHash, 'hex');
+    if (a.length !== b.length) return false;
+    return crypto.timingSafeEqual(a, b);
+}
+
+// ============================================
+// USERS
+// ============================================
+function createUser({ name, phone, password }) {
+    const existing = db.prepare(`SELECT id FROM users WHERE phone = ?`).get(phone);
+    if (existing) throw new Error('Un compte existe deja avec ce numero');
+
+    const id = randomUUID();
+    const { salt, hash } = hashPassword(password);
+    db.prepare(`
+        INSERT INTO users (id, name, phone, password_hash, password_salt, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+    `).run(id, name, phone, hash, salt, now());
+
+    return { id, name, phone };
+}
+
+function findUserByPhone(phone) {
+    return db.prepare(`SELECT * FROM users WHERE phone = ?`).get(phone);
+}
+
+function getUserById(id) {
+    return db.prepare(`SELECT id, name, phone, created_at FROM users WHERE id = ?`).get(id);
+}
+
+function listAllUsers() {
+    return db.prepare(`SELECT id, name, phone, created_at FROM users ORDER BY created_at ASC`).all();
+}
+
+// Admin-only: reset a user's password directly (used by scripts/reset-password.js,
+// not exposed via any HTTP route). Also invalidates all existing sessions for that
+// user, so a lost/compromised password can't still be used via an old session cookie.
+function resetPasswordByPhone(phone, newPassword) {
+    const user = findUserByPhone(phone);
+    if (!user) throw new Error(`Aucun compte trouve pour le numero ${phone}`);
+
+    const { salt, hash } = hashPassword(newPassword);
+    db.prepare(`UPDATE users SET password_hash = ?, password_salt = ? WHERE id = ?`)
+        .run(hash, salt, user.id);
+    db.prepare(`DELETE FROM sessions WHERE user_id = ?`).run(user.id);
+
+    return { id: user.id, name: user.name, phone: user.phone };
+}
+
+// ============================================
+// SESSIONS
+// ============================================
+const SESSION_DURATION_DAYS = 30;
+
+function createSession(userId) {
+    const token = crypto.randomBytes(32).toString('hex');
+    const ts = now();
+    const expires = new Date(Date.now() + SESSION_DURATION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    db.prepare(`
+        INSERT INTO sessions (token, user_id, created_at, expires_at)
+        VALUES (?, ?, ?, ?)
+    `).run(token, userId, ts, expires);
+    return { token, expires_at: expires };
+}
+
+function getSession(token) {
+    const session = db.prepare(`SELECT * FROM sessions WHERE token = ?`).get(token);
+    if (!session) return null;
+    if (new Date(session.expires_at) < new Date()) {
+        db.prepare(`DELETE FROM sessions WHERE token = ?`).run(token);
+        return null;
+    }
+    return session;
+}
+
+function deleteSession(token) {
+    db.prepare(`DELETE FROM sessions WHERE token = ?`).run(token);
+}
+
+// ============================================
+// PROSPECTS
+// ============================================
+function createProspect(ownerId, { name, phone, country, city, quarter, source, interest_type, next_followup_at }) {
+    const id = randomUUID();
+    const ts = now();
+
+    db.prepare(`
+        INSERT INTO prospects (id, owner_id, name, phone, country, city, quarter, stage, stage_updated_at,
+                                source, interest_type, outcome_type, is_archived, next_followup_at, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'nouveau', ?, ?, ?, NULL, 0, ?, ?, ?)
+    `).run(id, ownerId, name, phone || null, country || null, city || null, quarter || null,
+           ts, source || null, interest_type || null, next_followup_at || null, ts, ts);
+
+    db.prepare(`
+        INSERT INTO stage_history (id, prospect_id, from_stage, to_stage, changed_at, note)
+        VALUES (?, ?, NULL, 'nouveau', ?, NULL)
+    `).run(randomUUID(), id, ts);
+
+    return getProspect(ownerId, id);
+}
+
+function getProspect(ownerId, id) {
+    return db.prepare(`SELECT * FROM prospects WHERE id = ? AND owner_id = ?`).get(id, ownerId);
+}
+
+// Filters: stage, source, interest_type, country, city, quarter (exact/partial match), search (name or phone), archived
+function listProspects(ownerId, filters = {}) {
+    const clauses = ['owner_id = ?'];
+    const params = [ownerId];
+
+    if (!filters.includeArchived) {
+        clauses.push('is_archived = 0');
+    }
+    if (filters.stage) {
+        clauses.push('stage = ?');
+        params.push(filters.stage);
+    }
+    if (filters.source) {
+        clauses.push('source = ?');
+        params.push(filters.source);
+    }
+    if (filters.interest_type) {
+        clauses.push('interest_type = ?');
+        params.push(filters.interest_type);
+    }
+    if (filters.country) {
+        clauses.push('country = ?');
+        params.push(filters.country);
+    }
+    if (filters.city) {
+        clauses.push('city LIKE ?');
+        params.push(`%${filters.city}%`);
+    }
+    if (filters.quarter) {
+        clauses.push('quarter LIKE ?');
+        params.push(`%${filters.quarter}%`);
+    }
+    if (filters.search) {
+        clauses.push('(name LIKE ? OR phone LIKE ?)');
+        params.push(`%${filters.search}%`, `%${filters.search}%`);
+    }
+
+    const sql = `SELECT * FROM prospects WHERE ${clauses.join(' AND ')} ORDER BY stage_updated_at DESC`;
+    return db.prepare(sql).all(...params);
+}
+
+function updateProspect(ownerId, id, fields) {
+    const existing = getProspect(ownerId, id);
+    if (!existing) throw new Error('Contact introuvable');
+
+    const allowed = ['name', 'phone', 'country', 'city', 'quarter', 'source', 'interest_type', 'next_followup_at'];
+    const sets = [];
+    const values = [];
+    for (const key of allowed) {
+        if (fields[key] !== undefined) {
+            sets.push(`${key} = ?`);
+            values.push(fields[key]);
+        }
+    }
+    if (sets.length === 0) return existing;
+    sets.push('updated_at = ?');
+    values.push(now());
+    values.push(id, ownerId);
+    db.prepare(`UPDATE prospects SET ${sets.join(', ')} WHERE id = ? AND owner_id = ?`).run(...values);
+    return getProspect(ownerId, id);
+}
+
+function transitionStage(ownerId, id, toStage, note) {
+    if (!STAGES.includes(toStage)) {
+        throw new Error(`Etape invalide: ${toStage}`);
+    }
+    const prospect = getProspect(ownerId, id);
+    if (!prospect) throw new Error('Contact introuvable');
+
+    const ts = now();
+    db.prepare(`
+        INSERT INTO stage_history (id, prospect_id, from_stage, to_stage, changed_at, note)
+        VALUES (?, ?, ?, ?, ?, ?)
+    `).run(randomUUID(), id, prospect.stage, toStage, ts, note || null);
+
+    return getProspect(ownerId, id);
+}
+
+function setOutcomeType(ownerId, id, outcome_type) {
+    if (!['produit', 'partenaire'].includes(outcome_type)) {
+        throw new Error('outcome_type invalide');
+    }
+    const existing = getProspect(ownerId, id);
+    if (!existing) throw new Error('Contact introuvable');
+    db.prepare(`UPDATE prospects SET outcome_type = ?, updated_at = ? WHERE id = ? AND owner_id = ?`)
+        .run(outcome_type, now(), id, ownerId);
+    return getProspect(ownerId, id);
+}
+
+function archiveProspect(ownerId, id, archived = true) {
+    const existing = getProspect(ownerId, id);
+    if (!existing) throw new Error('Contact introuvable');
+    db.prepare(`UPDATE prospects SET is_archived = ?, updated_at = ? WHERE id = ? AND owner_id = ?`)
+        .run(archived ? 1 : 0, now(), id, ownerId);
+    return getProspect(ownerId, id);
+}
+
+function deleteProspect(ownerId, id) {
+    db.prepare(`DELETE FROM prospects WHERE id = ? AND owner_id = ?`).run(id, ownerId);
+}
+
+// ============================================
+// STAGE HISTORY
+// ============================================
+function getStageHistory(ownerId, prospectId) {
+    const owned = getProspect(ownerId, prospectId);
+    if (!owned) throw new Error('Contact introuvable');
+    return db.prepare(`
+        SELECT * FROM stage_history WHERE prospect_id = ? ORDER BY changed_at ASC
+    `).all(prospectId);
+}
+
+// ============================================
+// INTERACTIONS
+// ============================================
+function addInteraction(ownerId, prospectId, { type, content }) {
+    const owned = getProspect(ownerId, prospectId);
+    if (!owned) throw new Error('Contact introuvable');
+    if (!['appel', 'message', 'rencontre', 'note'].includes(type)) {
+        throw new Error("Type d'interaction invalide");
+    }
+    const id = randomUUID();
+    const ts = now();
+    db.prepare(`
+        INSERT INTO interactions (id, prospect_id, type, content, created_at)
+        VALUES (?, ?, ?, ?, ?)
+    `).run(id, prospectId, type, content, ts);
+
+    db.prepare(`UPDATE prospects SET updated_at = ? WHERE id = ?`).run(ts, prospectId);
+
+    return db.prepare(`SELECT * FROM interactions WHERE id = ?`).get(id);
+}
+
+function getInteractions(ownerId, prospectId) {
+    const owned = getProspect(ownerId, prospectId);
+    if (!owned) throw new Error('Contact introuvable');
+    return db.prepare(`
+        SELECT * FROM interactions WHERE prospect_id = ? ORDER BY created_at DESC
+    `).all(prospectId);
+}
+
+// ============================================
+// REMINDERS
+// ============================================
+function getDueReminders(ownerId) {
+    const nowIso = now();
+    return db.prepare(`
+        SELECT * FROM prospects
+        WHERE owner_id = ?
+          AND is_archived = 0
+          AND next_followup_at IS NOT NULL
+          AND next_followup_at <= ?
+        ORDER BY next_followup_at ASC
+    `).all(ownerId, nowIso);
+}
+
+// ============================================
+// STATS
+// ============================================
+function getConversionBenchmark(ownerId) {
+    const rows = db.prepare(`
+        SELECT
+            sh.prospect_id AS prospect_id,
+            sh.changed_at AS converted_at,
+            (SELECT MIN(changed_at) FROM stage_history WHERE prospect_id = sh.prospect_id) AS started_at
+        FROM stage_history sh
+        JOIN prospects p ON p.id = sh.prospect_id
+        WHERE sh.to_stage = 'client_partenaire' AND p.owner_id = ?
+    `).all(ownerId);
+
+    const days = rows
+        .map(r => (new Date(r.converted_at) - new Date(r.started_at)) / (1000 * 60 * 60 * 24))
+        .filter(d => d >= 0)
+        .sort((a, b) => a - b);
+
+    if (days.length === 0) {
+        return { count: 0, median_days: null, min_days: null, max_days: null };
+    }
+
+    const mid = Math.floor(days.length / 2);
+    const median = days.length % 2 === 0 ? (days[mid - 1] + days[mid]) / 2 : days[mid];
+
+    return {
+        count: days.length,
+        median_days: Math.round(median * 10) / 10,
+        min_days: Math.round(days[0] * 10) / 10,
+        max_days: Math.round(days[days.length - 1] * 10) / 10
+    };
+}
+
+function getSourceStats(ownerId) {
+    const rows = db.prepare(`
+        SELECT
+            COALESCE(source, 'non_renseigne') AS source,
+            COUNT(*) AS total,
+            SUM(CASE WHEN stage = 'client_partenaire' THEN 1 ELSE 0 END) AS converted
+        FROM prospects
+        WHERE owner_id = ? AND (is_archived = 0 OR stage = 'client_partenaire')
+        GROUP BY COALESCE(source, 'non_renseigne')
+        ORDER BY total DESC
+    `).all(ownerId);
+
+    return rows.map(r => ({
+        source: r.source,
+        total: r.total,
+        converted: r.converted,
+        conversion_rate: r.total > 0 ? Math.round((r.converted / r.total) * 1000) / 10 : 0
+    }));
+}
+
+// Country breakdown — answers "which countries is my downline actually in"
+function getCountryStats(ownerId) {
+    const rows = db.prepare(`
+        SELECT
+            COALESCE(country, 'non_renseigne') AS country,
+            COUNT(*) AS total,
+            SUM(CASE WHEN stage = 'client_partenaire' THEN 1 ELSE 0 END) AS converted
+        FROM prospects
+        WHERE owner_id = ? AND (is_archived = 0 OR stage = 'client_partenaire')
+        GROUP BY COALESCE(country, 'non_renseigne')
+        ORDER BY total DESC
+    `).all(ownerId);
+
+    return rows.map(r => ({
+        country: r.country,
+        total: r.total,
+        converted: r.converted,
+        conversion_rate: r.total > 0 ? Math.round((r.converted / r.total) * 1000) / 10 : 0
+    }));
+}
+
+module.exports = {
+    STAGES,
+    createUser,
+    findUserByPhone,
+    getUserById,
+    listAllUsers,
+    resetPasswordByPhone,
+    verifyPassword,
+    createSession,
+    getSession,
+    deleteSession,
+    createProspect,
+    getProspect,
+    listProspects,
+    updateProspect,
+    transitionStage,
+    setOutcomeType,
+    archiveProspect,
+    deleteProspect,
+    getStageHistory,
+    addInteraction,
+    getInteractions,
+    getDueReminders,
+    getConversionBenchmark,
+    getSourceStats,
+    getCountryStats
+};
