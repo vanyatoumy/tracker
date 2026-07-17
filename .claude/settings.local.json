@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls -la /mnt/e/2026/Workspace/mlm/App/v3/mlm-tracker/)",
+      "PowerShell(Get-ChildItem -Path E:\\\\2026\\\\Workspace\\\\mlm\\\\App\\\\v3\\\\mlm-tracker | Select-Object Name, @{Name=\"Type\";Expression={if \\($_.PSIsContainer\\) { \"DIR\" } else { \"FILE\" }}} | Format-Table -AutoSize)"
+    ]
+  }
+}

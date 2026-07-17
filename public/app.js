@@ -1,16 +1,21 @@
 const STAGES = [
-  { key: 'nouveau', label: 'Nouveau Contact' },
+  { key: 'nouveau', label: 'Contact' },
   { key: 'contacte', label: 'Contacte' },
+  { key: 'prospect', label: 'Prospect' },
   { key: 'interesse', label: 'Interesse' },
   { key: 'en_decision', label: 'En Decision' },
-  { key: 'client_partenaire', label: 'Client / Partenaire' }
+  { key: 'client', label: 'Client' },
+  { key: 'partenaire', label: 'Partenaire' }
 ];
+const INTERESSE_INDEX = STAGES.findIndex(s => s.key === 'interesse');
 
 const SOURCE_LABELS = {
   referral: 'Recommandation',
   facebook: 'Facebook',
   instagram: 'Instagram',
   whatsapp_status: 'Statut WhatsApp',
+  annuaire_telephonique: 'Annuaire téléphonique',
+  groupe_whatsapp: 'Groupe whatsapp',
   evenement: 'Evenement',
   approche_directe: 'Approche directe',
   autre: 'Autre',
@@ -21,6 +26,14 @@ let currentProspects = [];
 let activeProspectId = null;
 let currentUser = null;
 let activeFilters = {};
+
+function getCollapsedStages() {
+  try { return new Set(JSON.parse(localStorage.getItem('collapsedStages') || '[]')); }
+  catch { return new Set(); }
+}
+function setCollapsedStages(set) {
+  localStorage.setItem('collapsedStages', JSON.stringify([...set]));
+}
 
 // ============================================
 // API HELPER
@@ -181,6 +194,7 @@ document.getElementById('logoutBtn').addEventListener('click', async () => {
 
 async function bootApp() {
   showApp();
+  document.getElementById('currentUserInfo').textContent = currentUser ? `${currentUser.name} · ${currentUser.phone}` : '';
   populateDialSelects();
   populateCountrySelects();
   populateFilterOptions();
@@ -193,21 +207,36 @@ async function bootApp() {
 function renderBoard() {
   const board = document.getElementById('board');
   board.innerHTML = '';
+  const collapsed = getCollapsedStages();
 
   STAGES.forEach((stage, idx) => {
     const items = currentProspects.filter(p => p.stage === stage.key && !p.is_archived);
     const fillPct = ((idx + 1) / STAGES.length) * 100;
+    const isCollapsed = collapsed.has(stage.key);
 
     const col = document.createElement('div');
-    col.className = 'column';
+    col.className = `column ${isCollapsed ? 'collapsed' : ''}`;
     col.innerHTML = `
       <div class="column-header">
-        <p class="column-title">${stage.label} <span class="column-count">${items.length}</span></p>
+        <p class="column-title">
+          <span class="column-title-text">
+            <button class="collapse-toggle" data-stage="${stage.key}" title="Reduire / agrandir">${isCollapsed ? '▸' : '▾'}</button>
+            ${stage.label}
+          </span>
+          <span class="column-count">${items.length}</span>
+        </p>
         <div class="progress-rail"><div class="progress-rail-fill" style="width:${fillPct}%"></div></div>
       </div>
       <div class="column-body" id="col-${stage.key}"></div>
     `;
     board.appendChild(col);
+
+    col.querySelector('.collapse-toggle').addEventListener('click', () => {
+      const set = getCollapsedStages();
+      if (set.has(stage.key)) set.delete(stage.key); else set.add(stage.key);
+      setCollapsedStages(set);
+      renderBoard();
+    });
 
     const body = col.querySelector('.column-body');
     if (items.length === 0) {
@@ -228,6 +257,10 @@ function renderCard(p) {
     ? `<a class="card-wa" href="${wa}" target="_blank" rel="noopener" title="Ouvrir WhatsApp" onclick="event.stopPropagation()">&#x1F4AC;</a>`
     : '';
 
+  const fbLink = (p.source === 'facebook' && p.facebook_profile_url)
+    ? `<a class="card-wa" href="${escapeHtml(p.facebook_profile_url)}" target="_blank" rel="noopener" title="Ouvrir le profil Facebook" onclick="event.stopPropagation()">&#x1F310;</a>`
+    : '';
+
   let followupHtml = '';
   if (p.next_followup_at) {
     const isPast = new Date(p.next_followup_at) <= new Date();
@@ -239,7 +272,7 @@ function renderCard(p) {
   card.innerHTML = `
     <div class="card-top">
       <p class="card-name">${escapeHtml(p.name)}</p>
-      ${waLink}
+      ${waLink}${fbLink}
     </div>
     <div class="card-meta">
       ${p.source ? `<span class="tag">${SOURCE_LABELS[p.source] || p.source}</span>` : ''}
@@ -416,10 +449,14 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 const addModal = document.getElementById('addModal');
 document.getElementById('addProspectBtn').addEventListener('click', () => {
   document.getElementById('addPhoneDial').classList.add('dial-select');
+  document.getElementById('addFbGroup').classList.add('hidden');
   addModal.classList.remove('hidden');
 });
 document.getElementById('addPhoneDial').classList.add('dial-select');
 document.getElementById('addCountry').classList.add('country-select');
+document.getElementById('addSource').addEventListener('change', (e) => {
+  document.getElementById('addFbGroup').classList.toggle('hidden', e.target.value !== 'facebook');
+});
 
 document.getElementById('addForm').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -432,7 +469,7 @@ document.getElementById('addForm').addEventListener('submit', async (e) => {
     city: fd.get('city') || null,
     quarter: fd.get('quarter') || null,
     source: fd.get('source') || null,
-    interest_type: fd.get('interest_type') || null,
+    facebook_profile_url: fd.get('facebook_profile_url') || null,
     next_followup_at: fd.get('next_followup_at') ? new Date(fd.get('next_followup_at')).toISOString() : null
   };
   const created = await api('/api/prospects', { method: 'POST', body: JSON.stringify(payload) });
@@ -484,10 +521,6 @@ async function openDetail(id) {
     btn.addEventListener('click', async () => {
       if (btn.dataset.stage === p.stage) return;
       await api(`/api/prospects/${id}/stage`, { method: 'POST', body: JSON.stringify({ to_stage: btn.dataset.stage }) });
-      if (btn.dataset.stage === 'client_partenaire') {
-        const outcome = confirm("Ce contact est devenu Client (produit) ou Partenaire (business) ?\nOK = Partenaire, Annuler = Produit");
-        await api(`/api/prospects/${id}/outcome`, { method: 'POST', body: JSON.stringify({ outcome_type: outcome ? 'partenaire' : 'produit' }) });
-      }
       await openDetail(id);
       await refreshAll();
     });
@@ -507,30 +540,61 @@ async function openDetail(id) {
   document.getElementById('detailQuarter').value = p.quarter || '';
   document.getElementById('detailFollowup').value = toDatetimeLocalValue(p.next_followup_at);
 
+  // editable name — mistakes happen, this is the fix for that
+  document.getElementById('detailNameInput').value = p.name;
+
+  // source + conditional Facebook profile link (only meaningful for facebook-sourced contacts)
+  const sourceSel = document.getElementById('detailSource');
+  sourceSel.value = p.source || '';
+  document.getElementById('detailFbGroup').classList.toggle('hidden', sourceSel.value !== 'facebook');
+  document.getElementById('detailFbUrl').value = p.facebook_profile_url || '';
+
+  // interest_type only becomes relevant once a contact has shown actual interest —
+  // surfaced starting at "Interesse" and for every stage after it
+  const stageIdx = STAGES.findIndex(s => s.key === p.stage);
+  document.getElementById('detailInterestGroup').classList.toggle('hidden', stageIdx < INTERESSE_INDEX);
+  document.getElementById('detailInterest').value = p.interest_type || 'indecis';
+
   await loadInteractions(id);
   await loadHistory(id);
 
   detailModal.classList.remove('hidden');
 }
 
+document.getElementById('detailSource').addEventListener('change', (e) => {
+  document.getElementById('detailFbGroup').classList.toggle('hidden', e.target.value !== 'facebook');
+});
+
 document.getElementById('saveDetails').addEventListener('click', async () => {
   const dial = document.getElementById('detailPhoneDial').value;
   const local = document.getElementById('detailPhoneLocal').value;
   const phone = buildE164(dial, local);
   const followup = document.getElementById('detailFollowup').value;
+  const name = document.getElementById('detailNameInput').value.trim();
+  const source = document.getElementById('detailSource').value;
 
-  await api(`/api/prospects/${activeProspectId}`, {
-    method: 'PATCH',
-    body: JSON.stringify({
-      phone,
-      country: document.getElementById('detailCountry').value || null,
-      city: document.getElementById('detailCity').value || null,
-      quarter: document.getElementById('detailQuarter').value || null,
-      next_followup_at: followup ? new Date(followup).toISOString() : null
-    })
-  });
-  await openDetail(activeProspectId);
-  await refreshAll();
+  if (!name) { alert('Le nom ne peut pas etre vide.'); return; }
+
+  try {
+    await api(`/api/prospects/${activeProspectId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        name,
+        phone,
+        country: document.getElementById('detailCountry').value || null,
+        city: document.getElementById('detailCity').value || null,
+        quarter: document.getElementById('detailQuarter').value || null,
+        source: source || null,
+        facebook_profile_url: source === 'facebook' ? (document.getElementById('detailFbUrl').value || null) : null,
+        interest_type: document.getElementById('detailInterest').value || null,
+        next_followup_at: followup ? new Date(followup).toISOString() : null
+      })
+    });
+    await openDetail(activeProspectId);
+    await refreshAll();
+  } catch (err) {
+    alert(err.message);
+  }
 });
 
 document.getElementById('interactionForm').addEventListener('submit', async (e) => {
@@ -573,6 +637,13 @@ async function loadHistory(id) {
 document.getElementById('archiveBtn').addEventListener('click', async () => {
   if (!confirm('Marquer ce contact comme perdu ? Il sera retire du pipeline actif.')) return;
   await api(`/api/prospects/${activeProspectId}/archive`, { method: 'POST', body: JSON.stringify({ archived: true }) });
+  detailModal.classList.add('hidden');
+  await refreshAll();
+});
+
+document.getElementById('deleteBtn').addEventListener('click', async () => {
+  if (!confirm("Supprimer definitivement ce contact ? Cette action est irreversible — tout l'historique et les interactions seront perdus. Si tu veux juste le retirer du pipeline sans perdre l'historique, utilise plutot \"Marquer comme perdu\".")) return;
+  await api(`/api/prospects/${activeProspectId}`, { method: 'DELETE' });
   detailModal.classList.add('hidden');
   await refreshAll();
 });

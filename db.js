@@ -39,14 +39,14 @@ CREATE TABLE IF NOT EXISTS prospects (
     country         TEXT,
     city            TEXT,
     quarter         TEXT,
+    facebook_profile_url TEXT,               -- only meaningful when source = 'facebook'
     stage           TEXT NOT NULL CHECK (stage IN (
-                        'nouveau', 'contacte', 'interesse',
-                        'en_decision', 'client_partenaire'
+                        'nouveau', 'contacte', 'prospect', 'interesse',
+                        'en_decision', 'client', 'partenaire'
                     )),
     stage_updated_at TEXT NOT NULL,
     source          TEXT,
     interest_type   TEXT CHECK (interest_type IN ('produit', 'opportunite', 'indecis') OR interest_type IS NULL),
-    outcome_type    TEXT CHECK (outcome_type IN ('produit', 'partenaire') OR outcome_type IS NULL),
     is_archived     INTEGER NOT NULL DEFAULT 0,
     next_followup_at TEXT,
     created_at      TEXT NOT NULL,
@@ -95,7 +95,7 @@ BEGIN
 END;
 `);
 
-const STAGES = ['nouveau', 'contacte', 'interesse', 'en_decision', 'client_partenaire'];
+const STAGES = ['nouveau', 'contacte', 'prospect', 'interesse', 'en_decision', 'client', 'partenaire'];
 
 function now() {
     return new Date().toISOString();
@@ -195,15 +195,15 @@ function deleteSession(token) {
 // ============================================
 // PROSPECTS
 // ============================================
-function createProspect(ownerId, { name, phone, country, city, quarter, source, interest_type, next_followup_at }) {
+function createProspect(ownerId, { name, phone, country, city, quarter, facebook_profile_url, source, interest_type, next_followup_at }) {
     const id = randomUUID();
     const ts = now();
 
     db.prepare(`
-        INSERT INTO prospects (id, owner_id, name, phone, country, city, quarter, stage, stage_updated_at,
-                                source, interest_type, outcome_type, is_archived, next_followup_at, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'nouveau', ?, ?, ?, NULL, 0, ?, ?, ?)
-    `).run(id, ownerId, name, phone || null, country || null, city || null, quarter || null,
+        INSERT INTO prospects (id, owner_id, name, phone, country, city, quarter, facebook_profile_url, stage, stage_updated_at,
+                                source, interest_type, is_archived, next_followup_at, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'nouveau', ?, ?, ?, 0, ?, ?, ?)
+    `).run(id, ownerId, name, phone || null, country || null, city || null, quarter || null, facebook_profile_url || null,
            ts, source || null, interest_type || null, next_followup_at || null, ts, ts);
 
     db.prepare(`
@@ -263,7 +263,7 @@ function updateProspect(ownerId, id, fields) {
     const existing = getProspect(ownerId, id);
     if (!existing) throw new Error('Contact introuvable');
 
-    const allowed = ['name', 'phone', 'country', 'city', 'quarter', 'source', 'interest_type', 'next_followup_at'];
+    const allowed = ['name', 'phone', 'country', 'city', 'quarter', 'facebook_profile_url', 'source', 'interest_type', 'next_followup_at'];
     const sets = [];
     const values = [];
     for (const key of allowed) {
@@ -293,17 +293,6 @@ function transitionStage(ownerId, id, toStage, note) {
         VALUES (?, ?, ?, ?, ?, ?)
     `).run(randomUUID(), id, prospect.stage, toStage, ts, note || null);
 
-    return getProspect(ownerId, id);
-}
-
-function setOutcomeType(ownerId, id, outcome_type) {
-    if (!['produit', 'partenaire'].includes(outcome_type)) {
-        throw new Error('outcome_type invalide');
-    }
-    const existing = getProspect(ownerId, id);
-    if (!existing) throw new Error('Contact introuvable');
-    db.prepare(`UPDATE prospects SET outcome_type = ?, updated_at = ? WHERE id = ? AND owner_id = ?`)
-        .run(outcome_type, now(), id, ownerId);
     return getProspect(ownerId, id);
 }
 
@@ -385,7 +374,7 @@ function getConversionBenchmark(ownerId) {
             (SELECT MIN(changed_at) FROM stage_history WHERE prospect_id = sh.prospect_id) AS started_at
         FROM stage_history sh
         JOIN prospects p ON p.id = sh.prospect_id
-        WHERE sh.to_stage = 'client_partenaire' AND p.owner_id = ?
+        WHERE sh.to_stage IN ('client', 'partenaire') AND p.owner_id = ?
     `).all(ownerId);
 
     const days = rows
@@ -413,9 +402,9 @@ function getSourceStats(ownerId) {
         SELECT
             COALESCE(source, 'non_renseigne') AS source,
             COUNT(*) AS total,
-            SUM(CASE WHEN stage = 'client_partenaire' THEN 1 ELSE 0 END) AS converted
+            SUM(CASE WHEN stage IN ('client', 'partenaire') THEN 1 ELSE 0 END) AS converted
         FROM prospects
-        WHERE owner_id = ? AND (is_archived = 0 OR stage = 'client_partenaire')
+        WHERE owner_id = ? AND (is_archived = 0 OR stage IN ('client', 'partenaire'))
         GROUP BY COALESCE(source, 'non_renseigne')
         ORDER BY total DESC
     `).all(ownerId);
@@ -434,9 +423,9 @@ function getCountryStats(ownerId) {
         SELECT
             COALESCE(country, 'non_renseigne') AS country,
             COUNT(*) AS total,
-            SUM(CASE WHEN stage = 'client_partenaire' THEN 1 ELSE 0 END) AS converted
+            SUM(CASE WHEN stage IN ('client', 'partenaire') THEN 1 ELSE 0 END) AS converted
         FROM prospects
-        WHERE owner_id = ? AND (is_archived = 0 OR stage = 'client_partenaire')
+        WHERE owner_id = ? AND (is_archived = 0 OR stage IN ('client', 'partenaire'))
         GROUP BY COALESCE(country, 'non_renseigne')
         ORDER BY total DESC
     `).all(ownerId);
@@ -465,7 +454,6 @@ module.exports = {
     listProspects,
     updateProspect,
     transitionStage,
-    setOutcomeType,
     archiveProspect,
     deleteProspect,
     getStageHistory,

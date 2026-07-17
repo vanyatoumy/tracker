@@ -101,10 +101,10 @@ app.get('/api/prospects', requireAuth, (req, res) => {
 
 app.post('/api/prospects', requireAuth, (req, res) => {
     try {
-        const { name, phone, country, city, quarter, source, interest_type, next_followup_at } = req.body;
+        const { name, phone, country, city, quarter, facebook_profile_url, source, interest_type, next_followup_at } = req.body;
         if (!name || !name.trim()) throw new Error('Le nom est requis');
         res.status(201).json(db.createProspect(req.userId, {
-            name: name.trim(), phone, country, city, quarter, source, interest_type, next_followup_at
+            name: name.trim(), phone, country, city, quarter, facebook_profile_url, source, interest_type, next_followup_at
         }));
     } catch (err) { handleError(res, err); }
 });
@@ -117,6 +117,9 @@ app.get('/api/prospects/:id', requireAuth, (req, res) => {
 
 app.patch('/api/prospects/:id', requireAuth, (req, res) => {
     try {
+        if (req.body.name !== undefined && !req.body.name.trim()) {
+            throw new Error('Le nom ne peut pas etre vide');
+        }
         res.json(db.updateProspect(req.userId, req.params.id, req.body));
     } catch (err) { handleError(res, err); }
 });
@@ -125,12 +128,6 @@ app.post('/api/prospects/:id/stage', requireAuth, (req, res) => {
     try {
         const { to_stage, note } = req.body;
         res.json(db.transitionStage(req.userId, req.params.id, to_stage, note));
-    } catch (err) { handleError(res, err); }
-});
-
-app.post('/api/prospects/:id/outcome', requireAuth, (req, res) => {
-    try {
-        res.json(db.setOutcomeType(req.userId, req.params.id, req.body.outcome_type));
     } catch (err) { handleError(res, err); }
 });
 
