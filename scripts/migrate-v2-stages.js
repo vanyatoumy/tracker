@@ -29,6 +29,13 @@ function columnExists(db, table, column) {
 function main() {
     const db = new DatabaseSync(DB_PATH);
     db.exec('PRAGMA foreign_keys = OFF;'); // temporarily, while we swap tables around
+    // Without this, SQLite auto-rewrites OTHER tables' FK clauses and trigger
+    // bodies to follow the RENAME below (stage_history/interactions/the stage
+    // trigger all reference `prospects`) — pointing them at `prospects_old`,
+    // which then gets dropped, leaving dangling references. Disabling this
+    // auto-rewrite keeps their text saying `prospects`, which is valid again
+    // as soon as the new `prospects` table is created a few lines down.
+    db.exec('PRAGMA legacy_alter_table = ON;');
 
     // Already migrated? (facebook_profile_url only exists on the new schema)
     if (columnExists(db, 'prospects', 'facebook_profile_url')) {
@@ -133,6 +140,7 @@ function main() {
         }
 
         db.exec('COMMIT;');
+        db.exec('PRAGMA legacy_alter_table = OFF;');
         db.exec('PRAGMA foreign_keys = ON;');
 
         console.log(`✅ Migration terminee : ${oldProspects.length} contact(s) migre(s).`);
