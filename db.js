@@ -3,9 +3,11 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { randomUUID } = crypto;
+const config = require('./config');
+const { NotFoundError, ConflictError, ValidationError } = require('./errors');
 
-const DB_PATH = path.join(__dirname, 'data', 'tracker.db');
-fs.mkdirSync(path.join(__dirname, 'data'), { recursive: true });
+const DB_PATH = config.DB_PATH;
+fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
 const db = new DatabaseSync(DB_PATH);
 db.exec('PRAGMA foreign_keys = ON;');
@@ -96,6 +98,8 @@ END;
 `);
 
 const STAGES = ['nouveau', 'contacte', 'prospect', 'interesse', 'en_decision', 'client', 'partenaire'];
+const INTEREST_TYPES = ['produit', 'opportunite', 'indecis'];
+const INTERACTION_TYPES = ['appel', 'message', 'rencontre', 'note'];
 
 function now() {
     return new Date().toISOString();
@@ -123,7 +127,7 @@ function verifyPassword(password, salt, expectedHash) {
 // ============================================
 function createUser({ name, phone, password }) {
     const existing = db.prepare(`SELECT id FROM users WHERE phone = ?`).get(phone);
-    if (existing) throw new Error('Un compte existe deja avec ce numero');
+    if (existing) throw new ConflictError('Un compte existe deja avec ce numero');
 
     const id = randomUUID();
     const { salt, hash } = hashPassword(password);
@@ -152,7 +156,7 @@ function listAllUsers() {
 // user, so a lost/compromised password can't still be used via an old session cookie.
 function resetPasswordByPhone(phone, newPassword) {
     const user = findUserByPhone(phone);
-    if (!user) throw new Error(`Aucun compte trouve pour le numero ${phone}`);
+    if (!user) throw new NotFoundError(`Aucun compte trouve pour le numero ${phone}`);
 
     const { salt, hash } = hashPassword(newPassword);
     db.prepare(`UPDATE users SET password_hash = ?, password_salt = ? WHERE id = ?`)
@@ -165,7 +169,7 @@ function resetPasswordByPhone(phone, newPassword) {
 // ============================================
 // SESSIONS
 // ============================================
-const SESSION_DURATION_DAYS = 30;
+const SESSION_DURATION_DAYS = config.SESSION_DURATION_DAYS;
 
 function createSession(userId) {
     const token = crypto.randomBytes(32).toString('hex');
@@ -199,17 +203,28 @@ function createProspect(ownerId, { name, phone, country, city, quarter, facebook
     const id = randomUUID();
     const ts = now();
 
-    db.prepare(`
-        INSERT INTO prospects (id, owner_id, name, phone, country, city, quarter, facebook_profile_url, stage, stage_updated_at,
-                                source, interest_type, is_archived, next_followup_at, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'nouveau', ?, ?, ?, 0, ?, ?, ?)
-    `).run(id, ownerId, name, phone || null, country || null, city || null, quarter || null, facebook_profile_url || null,
-           ts, source || null, interest_type || null, next_followup_at || null, ts, ts);
+    // Wrapped in a transaction: without this, a failure on the second
+    // INSERT (e.g. a trigger error) leaves an orphaned prospect row with no
+    // stage_history entry — the two must succeed or fail together.
+    db.exec('BEGIN IMMEDIATE;');
+    try {
+        db.prepare(`
+            INSERT INTO prospects (id, owner_id, name, phone, country, city, quarter, facebook_profile_url, stage, stage_updated_at,
+                                    source, interest_type, is_archived, next_followup_at, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'nouveau', ?, ?, ?, 0, ?, ?, ?)
+        `).run(id, ownerId, name, phone || null, country || null, city || null, quarter || null, facebook_profile_url || null,
+               ts, source || null, interest_type || null, next_followup_at || null, ts, ts);
 
-    db.prepare(`
-        INSERT INTO stage_history (id, prospect_id, from_stage, to_stage, changed_at, note)
-        VALUES (?, ?, NULL, 'nouveau', ?, NULL)
-    `).run(randomUUID(), id, ts);
+        db.prepare(`
+            INSERT INTO stage_history (id, prospect_id, from_stage, to_stage, changed_at, note)
+            VALUES (?, ?, NULL, 'nouveau', ?, NULL)
+        `).run(randomUUID(), id, ts);
+
+        db.exec('COMMIT;');
+    } catch (err) {
+        db.exec('ROLLBACK;');
+        throw err;
+    }
 
     return getProspect(ownerId, id);
 }
@@ -261,7 +276,7 @@ function listProspects(ownerId, filters = {}) {
 
 function updateProspect(ownerId, id, fields) {
     const existing = getProspect(ownerId, id);
-    if (!existing) throw new Error('Contact introuvable');
+    if (!existing) throw new NotFoundError('Contact introuvable');
 
     const allowed = ['name', 'phone', 'country', 'city', 'quarter', 'facebook_profile_url', 'source', 'interest_type', 'next_followup_at'];
     const sets = [];
@@ -282,10 +297,10 @@ function updateProspect(ownerId, id, fields) {
 
 function transitionStage(ownerId, id, toStage, note) {
     if (!STAGES.includes(toStage)) {
-        throw new Error(`Etape invalide: ${toStage}`);
+        throw new ValidationError(`Etape invalide: ${toStage}`);
     }
     const prospect = getProspect(ownerId, id);
-    if (!prospect) throw new Error('Contact introuvable');
+    if (!prospect) throw new NotFoundError('Contact introuvable');
 
     const ts = now();
     db.prepare(`
@@ -298,7 +313,7 @@ function transitionStage(ownerId, id, toStage, note) {
 
 function archiveProspect(ownerId, id, archived = true) {
     const existing = getProspect(ownerId, id);
-    if (!existing) throw new Error('Contact introuvable');
+    if (!existing) throw new NotFoundError('Contact introuvable');
     db.prepare(`UPDATE prospects SET is_archived = ?, updated_at = ? WHERE id = ? AND owner_id = ?`)
         .run(archived ? 1 : 0, now(), id, ownerId);
     return getProspect(ownerId, id);
@@ -313,7 +328,7 @@ function deleteProspect(ownerId, id) {
 // ============================================
 function getStageHistory(ownerId, prospectId) {
     const owned = getProspect(ownerId, prospectId);
-    if (!owned) throw new Error('Contact introuvable');
+    if (!owned) throw new NotFoundError('Contact introuvable');
     return db.prepare(`
         SELECT * FROM stage_history WHERE prospect_id = ? ORDER BY changed_at ASC
     `).all(prospectId);
@@ -324,9 +339,9 @@ function getStageHistory(ownerId, prospectId) {
 // ============================================
 function addInteraction(ownerId, prospectId, { type, content }) {
     const owned = getProspect(ownerId, prospectId);
-    if (!owned) throw new Error('Contact introuvable');
-    if (!['appel', 'message', 'rencontre', 'note'].includes(type)) {
-        throw new Error("Type d'interaction invalide");
+    if (!owned) throw new NotFoundError('Contact introuvable');
+    if (!INTERACTION_TYPES.includes(type)) {
+        throw new ValidationError("Type d'interaction invalide");
     }
     const id = randomUUID();
     const ts = now();
@@ -342,7 +357,7 @@ function addInteraction(ownerId, prospectId, { type, content }) {
 
 function getInteractions(ownerId, prospectId) {
     const owned = getProspect(ownerId, prospectId);
-    if (!owned) throw new Error('Contact introuvable');
+    if (!owned) throw new NotFoundError('Contact introuvable');
     return db.prepare(`
         SELECT * FROM interactions WHERE prospect_id = ? ORDER BY created_at DESC
     `).all(prospectId);
@@ -440,6 +455,8 @@ function getCountryStats(ownerId) {
 
 module.exports = {
     STAGES,
+    INTEREST_TYPES,
+    INTERACTION_TYPES,
     createUser,
     findUserByPhone,
     getUserById,

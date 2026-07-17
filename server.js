@@ -1,27 +1,75 @@
 const express = require('express');
 const cookieParser = require('cookie-parser');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const path = require('path');
 const db = require('./db');
+const config = require('./config');
+const validate = require('./validate');
+const { ValidationError, AuthError } = require('./errors');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = config.PORT;
 const COOKIE_NAME = 'session_token';
-const isProd = process.env.NODE_ENV === 'production';
+const isProd = config.isProd;
 
-app.use(express.json());
+// Behind a reverse proxy (most hosts), trust the X-Forwarded-For header so
+// rate limiting and logging see the real client IP, not the proxy's.
+if (config.TRUST_PROXY) {
+    app.set('trust proxy', 1);
+}
+
+// Custom CSP: the frontend is vanilla JS/CSS served from this same origin
+// (no inline <script>), plus Google Fonts for the Montserrat typeface.
+// style-src needs 'unsafe-inline' because app.js renders a few dynamic
+// inline styles (e.g. the kanban progress-bar fill percentage) via
+// innerHTML — fine here since there is no inline *script*, only style.
+app.use(helmet({
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'"],
+            scriptSrc: ["'self'"],
+            styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+            fontSrc: ["'self'", 'https://fonts.gstatic.com'],
+            imgSrc: ["'self'", 'data:'],
+            connectSrc: ["'self'"],
+            objectSrc: ["'none'"],
+            baseUri: ["'self'"],
+            frameAncestors: ["'self'"]
+        }
+    }
+}));
+app.use(express.json({ limit: '100kb' }));
+app.use((req, res, next) => { if (!req.body || typeof req.body !== 'object') req.body = {}; next(); });
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Brute-force / signup-spam protection on the auth endpoints only — the rest
+// of the API is already gated behind an authenticated session.
+const authLimiter = rateLimit({
+    windowMs: config.RATE_LIMIT_AUTH_WINDOW_MIN * 60 * 1000,
+    max: config.RATE_LIMIT_AUTH_MAX,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Trop de tentatives, reessaie plus tard' }
+});
+
 function handleError(res, err) {
     console.error(err);
-    res.status(400).json({ error: err.message });
+    if (err.statusCode) {
+        return res.status(err.statusCode).json({ error: err.message });
+    }
+    // Unexpected/internal error: never leak details (stack traces, SQL,
+    // file paths) to the client. Full detail is already in the server log
+    // above via console.error.
+    res.status(500).json({ error: isProd ? 'Une erreur interne est survenue' : err.message });
 }
 
 function setSessionCookie(res, token, expiresAt) {
     res.cookie(COOKIE_NAME, token, {
         httpOnly: true,
         sameSite: 'lax',
-        secure: isProd,
+        secure: config.COOKIE_SECURE,
         expires: new Date(expiresAt)
     });
 }
@@ -38,26 +86,32 @@ function requireAuth(req, res, next) {
 
 // ---------- AUTH ROUTES ----------
 
-app.post('/api/auth/register', (req, res) => {
+app.post('/api/auth/register', authLimiter, (req, res) => {
     try {
-        const { name, phone, password } = req.body;
-        if (!name || !name.trim()) throw new Error('Le nom est requis');
-        if (!phone || !phone.trim()) throw new Error('Le numero est requis');
-        if (!password || password.length < 6) throw new Error('Mot de passe : 6 caracteres minimum');
+        const name = validate.str(req.body.name, 'Le nom', { required: true, maxLength: 100 });
+        const phone = validate.phone(req.body.phone, 'Le numero', { required: true });
+        const { password } = req.body;
+        if (typeof password !== 'string' || password.length < 6 || password.length > 200) {
+            throw new ValidationError('Mot de passe : 6 a 200 caracteres');
+        }
 
-        const user = db.createUser({ name: name.trim(), phone: phone.trim(), password });
+        const user = db.createUser({ name, phone, password });
         const { token, expires_at } = db.createSession(user.id);
         setSessionCookie(res, token, expires_at);
         res.status(201).json(user);
     } catch (err) { handleError(res, err); }
 });
 
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', authLimiter, (req, res) => {
     try {
-        const { phone, password } = req.body;
-        const user = db.findUserByPhone((phone || '').trim());
-        if (!user || !db.verifyPassword(password || '', user.password_salt, user.password_hash)) {
-            throw new Error('Numero ou mot de passe incorrect');
+        // Deliberately lenient here (no strict format check): existing
+        // accounts must always be able to log in even if validation rules
+        // tighten later. Format is enforced at registration time instead.
+        const phone = typeof req.body.phone === 'string' ? req.body.phone.trim() : '';
+        const password = typeof req.body.password === 'string' ? req.body.password : '';
+        const user = phone ? db.findUserByPhone(phone) : null;
+        if (!user || !db.verifyPassword(password, user.password_salt, user.password_hash)) {
+            throw new AuthError('Numero ou mot de passe incorrect');
         }
         const { token, expires_at } = db.createSession(user.id);
         setSessionCookie(res, token, expires_at);
@@ -101,10 +155,19 @@ app.get('/api/prospects', requireAuth, (req, res) => {
 
 app.post('/api/prospects', requireAuth, (req, res) => {
     try {
-        const { name, phone, country, city, quarter, facebook_profile_url, source, interest_type, next_followup_at } = req.body;
-        if (!name || !name.trim()) throw new Error('Le nom est requis');
+        const body = req.body || {};
+        const name = validate.str(body.name, 'Le nom', { required: true, maxLength: 200 });
+        const phone = validate.phone(body.phone, 'Le telephone');
+        const country = validate.str(body.country, 'Le pays', { maxLength: 100 });
+        const city = validate.str(body.city, 'La ville', { maxLength: 100 });
+        const quarter = validate.str(body.quarter, 'Le quartier', { maxLength: 100 });
+        const source = validate.str(body.source, 'La source', { maxLength: 50 });
+        const interest_type = validate.oneOf(body.interest_type, "Le type d'interet", db.INTEREST_TYPES);
+        const next_followup_at = validate.isoDate(body.next_followup_at, 'La date de relance');
+        const facebook_profile_url = validate.url(body.facebook_profile_url, 'Le lien Facebook');
+
         res.status(201).json(db.createProspect(req.userId, {
-            name: name.trim(), phone, country, city, quarter, facebook_profile_url, source, interest_type, next_followup_at
+            name, phone, country, city, quarter, facebook_profile_url, source, interest_type, next_followup_at
         }));
     } catch (err) { handleError(res, err); }
 });
@@ -117,16 +180,26 @@ app.get('/api/prospects/:id', requireAuth, (req, res) => {
 
 app.patch('/api/prospects/:id', requireAuth, (req, res) => {
     try {
-        if (req.body.name !== undefined && !req.body.name.trim()) {
-            throw new Error('Le nom ne peut pas etre vide');
-        }
-        res.json(db.updateProspect(req.userId, req.params.id, req.body));
+        const body = req.body || {};
+        const fields = {};
+        if ('name' in body) fields.name = validate.str(body.name, 'Le nom', { required: true, maxLength: 200 });
+        if ('phone' in body) fields.phone = validate.phone(body.phone, 'Le telephone');
+        if ('country' in body) fields.country = validate.str(body.country, 'Le pays', { maxLength: 100 });
+        if ('city' in body) fields.city = validate.str(body.city, 'La ville', { maxLength: 100 });
+        if ('quarter' in body) fields.quarter = validate.str(body.quarter, 'Le quartier', { maxLength: 100 });
+        if ('source' in body) fields.source = validate.str(body.source, 'La source', { maxLength: 50 });
+        if ('interest_type' in body) fields.interest_type = validate.oneOf(body.interest_type, "Le type d'interet", db.INTEREST_TYPES);
+        if ('next_followup_at' in body) fields.next_followup_at = validate.isoDate(body.next_followup_at, 'La date de relance');
+        if ('facebook_profile_url' in body) fields.facebook_profile_url = validate.url(body.facebook_profile_url, 'Le lien Facebook');
+
+        res.json(db.updateProspect(req.userId, req.params.id, fields));
     } catch (err) { handleError(res, err); }
 });
 
 app.post('/api/prospects/:id/stage', requireAuth, (req, res) => {
     try {
-        const { to_stage, note } = req.body;
+        const to_stage = validate.oneOf(req.body.to_stage, "L'etape", db.STAGES, { required: true });
+        const note = validate.str(req.body.note, 'La note', { maxLength: 1000 });
         res.json(db.transitionStage(req.userId, req.params.id, to_stage, note));
     } catch (err) { handleError(res, err); }
 });
@@ -161,9 +234,9 @@ app.get('/api/prospects/:id/interactions', requireAuth, (req, res) => {
 
 app.post('/api/prospects/:id/interactions', requireAuth, (req, res) => {
     try {
-        const { type, content } = req.body;
-        if (!content || !content.trim()) throw new Error('Le contenu est requis');
-        res.status(201).json(db.addInteraction(req.userId, req.params.id, { type, content: content.trim() }));
+        const type = validate.oneOf(req.body.type, "Le type d'interaction", db.INTERACTION_TYPES, { required: true });
+        const content = validate.str(req.body.content, 'Le contenu', { required: true, maxLength: 2000 });
+        res.status(201).json(db.addInteraction(req.userId, req.params.id, { type, content }));
     } catch (err) { handleError(res, err); }
 });
 
