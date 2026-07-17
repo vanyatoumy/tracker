@@ -1,7 +1,7 @@
 # Suivi Prospection
 
 Application de suivi de prospection pour distributeurs MLM/vente directe.
-Layer 1 uniquement : pipeline en 5 etapes, historique complet, relances, et
+Layer 1 uniquement : pipeline en 7 etapes, historique complet, relances, et
 benchmark de temps de conversion — pas de moteur de commissions (Layer 2, a venir).
 
 ## Demarrage rapide
@@ -27,13 +27,16 @@ regulierement (copier le fichier suffit, pas besoin d'export).
   (numero + mot de passe) et ne voit que ses propres prospects. Mots de passe
   hashes avec `scrypt` (integre a Node, aucune dependance externe). Session
   par cookie (30 jours), stockee dans SQLite.
-- **Pipeline kanban** : 5 colonnes (Nouveau Contact -> Contacte -> Interesse ->
-  En Decision -> Client/Partenaire), avec indicateur visuel d'anciennete sur
-  chaque carte (bordure qui devient rouge si le contact n'a pas bouge depuis
-  plusieurs jours).
+- **Pipeline kanban** : 7 colonnes (Nouveau Contact -> Contacte -> Prospect ->
+  Interesse -> En Decision -> Client / Partenaire), avec indicateur visuel
+  d'anciennete sur chaque carte (bordure qui devient rouge si le contact n'a
+  pas bouge depuis plusieurs jours). Les colonnes peuvent etre repliees
+  individuellement (memorise localement dans le navigateur).
 - **Localisation** : pays, ville, quartier — optionnels — sur chaque contact.
   Visible directement sur la carte kanban (📍) et filtrable, pour voir en un
   coup d'oeil ou se trouve le downline hors Cameroun.
+- **Profil Facebook** : lien optionnel, affiche sur la carte kanban quand la
+  source du contact est "facebook".
 - **Recherche et filtres** : par nom/numero, pays, ville (correspondance
   partielle), source, et type d'interet — combinables.
 - **Telephone standardise (E.164)** : selecteur d'indicatif pays + numero
@@ -109,6 +112,9 @@ suivi-prospection/
 │   ├── index.html  # Interface (kanban, modales, stats)
 │   ├── style.css    # Theme sombre / rouge, Montserrat
 │   └── app.js       # Logique frontend (aucun framework, JS natif)
+├── scripts/
+│   ├── reset-password.js       # Reinitialisation manuelle d'un mot de passe
+│   └── migrate-v2-stages.js    # Migration schema v1 -> v2 (7 etapes, profil Facebook)
 └── data/            # Cree automatiquement — contient tracker.db
 ```
 
@@ -131,9 +137,10 @@ n'ecrit jamais directement le champ `stage`, il insere uniquement dans
 | GET | `/api/auth/me` | Utilisateur courant (401 si non connecte) |
 | GET | `/api/prospects` | Liste, filtrable : `?archived=1`, `?stage=`, `?source=`, `?interest_type=`, `?country=`, `?city=`, `?quarter=`, `?search=` |
 | POST | `/api/prospects` | Creer un prospect |
+| GET | `/api/prospects/:id` | Detail d'un prospect |
 | PATCH | `/api/prospects/:id` | Modifier nom/telephone/localisation/source/relance |
-| POST | `/api/prospects/:id/stage` | Transition d'etape (`{to_stage, note}`) |
-| POST | `/api/prospects/:id/outcome` | Marquer produit vs partenaire |
+| DELETE | `/api/prospects/:id` | Supprimer definitivement (distinct de l'archivage) |
+| POST | `/api/prospects/:id/stage` | Transition d'etape (`{to_stage, note}`) — le pipeline a 7 etapes, la derniere se scinde en `client` ou `partenaire` |
 | POST | `/api/prospects/:id/archive` | Archiver / restaurer |
 | GET | `/api/prospects/:id/history` | Historique complet des etapes |
 | GET/POST | `/api/prospects/:id/interactions` | Journal des interactions |
