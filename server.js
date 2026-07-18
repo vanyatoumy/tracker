@@ -395,8 +395,11 @@ app.get('/api/stats/countries', requireAuth, (req, res) => {
 // port/DB — importing this module must not have the side effect of binding
 // a real port.
 if (require.main === module) {
-    app.listen(PORT, () => {
-        console.log(`Suivi Prospection running: http://localhost:${PORT}`);
+    // Explicit 0.0.0.0 bind — some hosts default a bare app.listen(PORT) to
+    // IPv6-only ('::'), which breaks external IPv4 access behind certain
+    // VPS network setups/reverse proxies.
+    app.listen(PORT, '0.0.0.0', () => {
+        console.log(`Suivi Prospection running on port ${PORT}`);
     });
 }
 
