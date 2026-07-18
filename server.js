@@ -148,7 +148,7 @@ app.post('/api/auth/login', authLimiter, (req, res) => {
         db.clearFailedLogins(user.id);
         const { token, expires_at } = db.createSession(user.id);
         setSessionCookie(res, token, expires_at);
-        res.json({ id: user.id, name: user.name, phone: user.phone });
+        res.json({ id: user.id, name: user.name, phone: user.phone, is_admin: !!user.is_admin });
     } catch (err) { handleError(res, err); }
 });
 

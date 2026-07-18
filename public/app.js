@@ -206,6 +206,7 @@ document.getElementById('logoutBtn').addEventListener('click', async () => {
 async function bootApp() {
   showApp();
   document.getElementById('currentUserInfo').textContent = currentUser ? `${currentUser.name} · ${currentUser.phone}` : '';
+  document.getElementById('adminTabBtn').classList.toggle('hidden', !currentUser?.is_admin);
   populateDialSelects();
   populateCountrySelects();
   populateFilterOptions();
@@ -451,8 +452,80 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     if (view === 'stats') await loadStats();
     if (view === 'archived') await loadArchived();
     if (view === 'board') await loadProspects();
+    if (view === 'admin') await loadAdminUsers();
   });
 });
+
+// ============================================
+// ADMIN (visible only to accounts with is_admin — see bootApp)
+// ============================================
+async function loadAdminUsers() {
+  const tbody = document.querySelector('#adminUsersTable tbody');
+  tbody.innerHTML = '<tr><td colspan="6">Chargement...</td></tr>';
+  let users;
+  try {
+    users = await api('/api/admin/users');
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="6">${err.message}</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = '';
+  users.forEach(u => {
+    const isLocked = u.locked_until && new Date(u.locked_until) > new Date();
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${u.name}${u.is_admin ? ' <span title="Administrateur">👑</span>' : ''}</td>
+      <td>${u.phone}</td>
+      <td>${u.is_active ? 'Actif' : 'Inactif'}</td>
+      <td>${isLocked ? `Verrouille jusqu'a ${new Date(u.locked_until).toLocaleString('fr-FR')}` : '—'}</td>
+      <td>${new Date(u.created_at).toLocaleDateString('fr-FR')}</td>
+      <td class="admin-actions"></td>
+    `;
+    const actionsCell = tr.querySelector('.admin-actions');
+
+    const toggleBtn = document.createElement('button');
+    toggleBtn.className = 'btn-ghost';
+    toggleBtn.textContent = u.is_active ? 'Desactiver' : 'Activer';
+    toggleBtn.addEventListener('click', async () => {
+      toggleBtn.disabled = true;
+      try {
+        await api(`/api/admin/users/${u.id}/activate`, {
+          method: 'POST',
+          body: JSON.stringify({ active: !u.is_active })
+        });
+        await loadAdminUsers();
+      } catch (err) {
+        alert(err.message);
+        toggleBtn.disabled = false;
+      }
+    });
+    actionsCell.appendChild(toggleBtn);
+
+    if (isLocked) {
+      const unlockBtn = document.createElement('button');
+      unlockBtn.className = 'btn-ghost';
+      unlockBtn.textContent = 'Debloquer';
+      unlockBtn.addEventListener('click', async () => {
+        unlockBtn.disabled = true;
+        try {
+          await api(`/api/admin/users/${u.id}/unlock`, { method: 'POST' });
+          await loadAdminUsers();
+        } catch (err) {
+          alert(err.message);
+          unlockBtn.disabled = false;
+        }
+      });
+      actionsCell.appendChild(unlockBtn);
+    }
+
+    tbody.appendChild(tr);
+  });
+
+  if (users.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6">Aucun compte.</td></tr>';
+  }
+}
 
 // ============================================
 // ADD PROSPECT MODAL

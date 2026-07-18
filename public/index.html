@@ -64,6 +64,7 @@
     <button class="tab-btn active" data-view="board">Pipeline</button>
     <button class="tab-btn" data-view="stats">Statistiques</button>
     <button class="tab-btn" data-view="archived">Archives</button>
+    <button class="tab-btn hidden" id="adminTabBtn" data-view="admin">Admin</button>
   </nav>
   <div class="topbar-right">
     <span id="currentUserInfo" class="current-user-info"></span>
@@ -151,6 +152,20 @@
   <!-- ARCHIVED VIEW -->
   <section id="archivedView" class="view hidden">
     <div class="archived-list" id="archivedList"></div>
+  </section>
+
+  <!-- ADMIN VIEW (only shown to admin accounts) -->
+  <section id="adminView" class="view hidden">
+    <h2 class="section-title">Comptes utilisateurs</h2>
+    <p class="section-hint">Active les nouveaux comptes, debloque les comptes verrouilles apres des echecs de connexion repetes.</p>
+    <div class="table-wrap">
+      <table id="adminUsersTable">
+        <thead>
+          <tr><th>Nom</th><th>Numero</th><th>Statut</th><th>Verrouillage</th><th>Cree le</th><th>Actions</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
   </section>
 </main>
 
