@@ -44,9 +44,14 @@ async function api(path, opts = {}) {
     credentials: 'same-origin',
     ...opts
   });
-  if (res.status === 401) {
+  // Login/register are expected to return 401 for wrong credentials — that's
+  // a normal rejection with its own message, not an expired session. Only
+  // treat 401 as "your session died, go back to the login screen" for every
+  // OTHER endpoint (which require an existing session to begin with).
+  const isAuthAttempt = path === '/api/auth/login' || path === '/api/auth/register';
+  if (res.status === 401 && !isAuthAttempt) {
     showAuthScreen();
-    throw new Error('Session expiree');
+    throw new Error('Session expiree, reconnecte-toi');
   }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: 'Erreur inconnue' }));
@@ -176,11 +181,17 @@ document.getElementById('registerForm').addEventListener('submit', async (e) => 
   errEl.textContent = '';
   const fd = new FormData(e.target);
   try {
-    currentUser = await api('/api/auth/register', {
+    const result = await api('/api/auth/register', {
       method: 'POST',
       body: JSON.stringify({ name: fd.get('name'), phone: fd.get('phone'), password: fd.get('password') })
     });
-    await bootApp();
+    // Accounts are created inactive and need admin activation — no session is
+    // issued at registration time, so don't try to boot the app here. Switch
+    // to the login tab and show the activation notice there instead.
+    e.target.reset();
+    document.querySelector('.auth-tab-btn[data-auth="login"]').click();
+    document.getElementById('loginError').textContent =
+      result.message || 'Compte cree. Il doit etre active par un administrateur avant que tu puisses te connecter.';
   } catch (err) {
     errEl.textContent = err.message;
   }

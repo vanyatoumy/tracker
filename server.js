@@ -95,10 +95,16 @@ app.post('/api/auth/register', authLimiter, (req, res) => {
             throw new ValidationError('Mot de passe : 6 a 200 caracteres');
         }
 
+        // New accounts are created inactive (see db.js) and can't log in until an
+        // admin activates them via scripts/activate-account.js — no admin dashboard
+        // yet. So, unlike before, registration does NOT auto-login: creating a
+        // session here would let an inactive account straight into the app,
+        // defeating the activation gate entirely.
         const user = db.createUser({ name, phone, password });
-        const { token, expires_at } = db.createSession(user.id);
-        setSessionCookie(res, token, expires_at);
-        res.status(201).json(user);
+        res.status(201).json({
+            ...user,
+            message: "Compte cree. Il doit etre active par un administrateur avant que tu puisses te connecter."
+        });
     } catch (err) { handleError(res, err); }
 });
 
@@ -110,9 +116,25 @@ app.post('/api/auth/login', authLimiter, (req, res) => {
         const phone = typeof req.body.phone === 'string' ? req.body.phone.trim() : '';
         const password = typeof req.body.password === 'string' ? req.body.password : '';
         const user = phone ? db.findUserByPhone(phone) : null;
+
+        // Check lockout before touching the password, so a locked account
+        // gets a clear "try again later" message instead of a generic
+        // credentials error on every attempt while it's locked.
+        if (user && user.locked_until && new Date(user.locked_until) > new Date()) {
+            const minutesLeft = Math.ceil((new Date(user.locked_until) - new Date()) / 60000);
+            throw new AuthError(`Compte temporairement bloque suite a plusieurs echecs. Reessaie dans ${minutesLeft} minute(s).`);
+        }
+
         if (!user || !db.verifyPassword(password, user.password_salt, user.password_hash)) {
+            if (user) db.registerFailedLogin(user.id);
             throw new AuthError('Numero ou mot de passe incorrect');
         }
+
+        if (!user.is_active) {
+            throw new AuthError('Ce compte n\'a pas encore ete active. Contacte l\'administrateur.');
+        }
+
+        db.clearFailedLogins(user.id);
         const { token, expires_at } = db.createSession(user.id);
         setSessionCookie(res, token, expires_at);
         res.json({ id: user.id, name: user.name, phone: user.phone });

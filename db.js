@@ -22,6 +22,9 @@ CREATE TABLE IF NOT EXISTS users (
     phone           TEXT NOT NULL UNIQUE,   -- E.164, used as login identifier
     password_hash   TEXT NOT NULL,
     password_salt   TEXT NOT NULL,
+    is_active       INTEGER NOT NULL DEFAULT 1,
+    failed_login_attempts INTEGER NOT NULL DEFAULT 0,
+    locked_until    TEXT,
     created_at      TEXT NOT NULL
 );
 
@@ -97,7 +100,30 @@ BEGIN
 END;
 `);
 
+// ---- Lightweight additive migration for existing databases ----
+// CREATE TABLE IF NOT EXISTS above only applies to brand-new databases; a
+// live DB created before the columns existed needs them added explicitly.
+// These are plain ADD COLUMN calls (not a rename), so they don't trigger the
+// FK/trigger rewrite issue that bit the v2 stage migration.
+(function migrateUserColumns() {
+    const cols = db.prepare(`PRAGMA table_info(users)`).all().map(c => c.name);
+    if (!cols.includes('is_active')) {
+        // Default existing accounts to active — this flag only gates *newly
+        // registered* accounts going forward; nobody who could already log
+        // in should be locked out by adding the column.
+        db.exec(`ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1;`);
+    }
+    if (!cols.includes('failed_login_attempts')) {
+        db.exec(`ALTER TABLE users ADD COLUMN failed_login_attempts INTEGER NOT NULL DEFAULT 0;`);
+    }
+    if (!cols.includes('locked_until')) {
+        db.exec(`ALTER TABLE users ADD COLUMN locked_until TEXT;`);
+    }
+})();
+
 const STAGES = ['nouveau', 'contacte', 'prospect', 'interesse', 'en_decision', 'client', 'partenaire'];
+const FAILED_LOGIN_LOCK_THRESHOLD = 4; // lock the account after this many consecutive failures
+const LOCKOUT_DURATION_MIN = 15;
 const INTEREST_TYPES = ['produit', 'opportunite', 'indecis'];
 const INTERACTION_TYPES = ['appel', 'message', 'rencontre', 'note'];
 
@@ -131,12 +157,15 @@ function createUser({ name, phone, password }) {
 
     const id = randomUUID();
     const { salt, hash } = hashPassword(password);
+    // New accounts start inactive — there's no admin dashboard yet, so
+    // activation happens directly against the DB (see scripts/activate-account.js).
+    // Until activated, login is blocked (see login route in server.js).
     db.prepare(`
-        INSERT INTO users (id, name, phone, password_hash, password_salt, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO users (id, name, phone, password_hash, password_salt, is_active, created_at)
+        VALUES (?, ?, ?, ?, ?, 0, ?)
     `).run(id, name, phone, hash, salt, now());
 
-    return { id, name, phone };
+    return { id, name, phone, is_active: 0 };
 }
 
 function findUserByPhone(phone) {
@@ -148,7 +177,7 @@ function getUserById(id) {
 }
 
 function listAllUsers() {
-    return db.prepare(`SELECT id, name, phone, created_at FROM users ORDER BY created_at ASC`).all();
+    return db.prepare(`SELECT id, name, phone, is_active, created_at FROM users ORDER BY created_at ASC`).all();
 }
 
 // Admin-only: reset a user's password directly (used by scripts/reset-password.js,
@@ -164,6 +193,39 @@ function resetPasswordByPhone(phone, newPassword) {
     db.prepare(`DELETE FROM sessions WHERE user_id = ?`).run(user.id);
 
     return { id: user.id, name: user.name, phone: user.phone };
+}
+
+// Admin-only: activate/deactivate a user directly (used by
+// scripts/activate-account.js, not exposed via any HTTP route).
+function setUserActive(phone, active) {
+    const user = findUserByPhone(phone);
+    if (!user) throw new NotFoundError(`Aucun compte trouve pour le numero ${phone}`);
+    db.prepare(`UPDATE users SET is_active = ? WHERE id = ?`).run(active ? 1 : 0, user.id);
+    // Activating a previously-blocked account should also clear any lockout
+    // left over from failed attempts, so it isn't immediately re-blocked.
+    if (active) {
+        db.prepare(`UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = ?`).run(user.id);
+    }
+    return { id: user.id, name: user.name, phone: user.phone, is_active: active ? 1 : 0 };
+}
+
+// Called on every failed password check. Once the account hits
+// FAILED_LOGIN_LOCK_THRESHOLD consecutive failures, it's locked for
+// LOCKOUT_DURATION_MIN minutes and the counter resets.
+function registerFailedLogin(userId) {
+    const user = db.prepare(`SELECT failed_login_attempts FROM users WHERE id = ?`).get(userId);
+    const attempts = (user?.failed_login_attempts || 0) + 1;
+    if (attempts >= FAILED_LOGIN_LOCK_THRESHOLD) {
+        const lockedUntil = new Date(Date.now() + LOCKOUT_DURATION_MIN * 60 * 1000).toISOString();
+        db.prepare(`UPDATE users SET failed_login_attempts = 0, locked_until = ? WHERE id = ?`).run(lockedUntil, userId);
+        return { locked: true, lockedUntil };
+    }
+    db.prepare(`UPDATE users SET failed_login_attempts = ? WHERE id = ?`).run(attempts, userId);
+    return { locked: false, attemptsRemaining: FAILED_LOGIN_LOCK_THRESHOLD - attempts };
+}
+
+function clearFailedLogins(userId) {
+    db.prepare(`UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = ?`).run(userId);
 }
 
 // ============================================
@@ -462,6 +524,9 @@ module.exports = {
     getUserById,
     listAllUsers,
     resetPasswordByPhone,
+    setUserActive,
+    registerFailedLogin,
+    clearFailedLogins,
     verifyPassword,
     createSession,
     getSession,
