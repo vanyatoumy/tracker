@@ -325,6 +325,15 @@ app.get('/api/stats/countries', requireAuth, (req, res) => {
     } catch (err) { handleError(res, err); }
 });
 
-app.listen(PORT, () => {
-    console.log(`Suivi Prospection running: http://localhost:${PORT}`);
-});
+// Only auto-start the HTTP listener when this file is run directly (`node
+// server.js` / `npm start`). When required from elsewhere — namely the test
+// suite, which needs a fresh `app` per test file bound to an ephemeral
+// port/DB — importing this module must not have the side effect of binding
+// a real port.
+if (require.main === module) {
+    app.listen(PORT, () => {
+        console.log(`Suivi Prospection running: http://localhost:${PORT}`);
+    });
+}
+
+module.exports = app;
