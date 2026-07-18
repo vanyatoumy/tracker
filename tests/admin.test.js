@@ -91,3 +91,65 @@ test('an admin deactivating an account blocks its next login', async () => {
     assert.equal(res.status, 401);
     assert.match(res.body.error, /active/i);
 });
+
+test('a non-admin cannot reset another account\'s password', async () => {
+    const phone = '+237600333006';
+    db.createUser({ name: 'Regular2', phone, password: PASSWORD });
+    db.setUserActive(phone, true);
+
+    const targetPhone = '+237600333007';
+    const target = db.createUser({ name: 'Target3', phone: targetPhone, password: PASSWORD });
+    db.setUserActive(targetPhone, true);
+
+    const client = await loginAs(phone);
+    const res = await client.post(`/api/admin/users/${target.id}/reset-password`, { new_password: 'hijacked123' });
+    assert.equal(res.status, 403);
+});
+
+test('an admin can reset a password over HTTP, invalidating old sessions and enabling the new password', async () => {
+    const adminPhone = '+237600333008';
+    db.createUser({ name: 'Admin3', phone: adminPhone, password: PASSWORD });
+    db.setUserActive(adminPhone, true);
+    db.setUserAdmin(adminPhone, true);
+
+    const targetPhone = '+237600333009';
+    const target = db.createUser({ name: 'Target4', phone: targetPhone, password: PASSWORD });
+    db.setUserActive(targetPhone, true);
+
+    // Target logs in and holds a live session before the reset.
+    const targetClient = makeClient();
+    const targetLogin = await targetClient.post('/api/auth/login', { phone: targetPhone, password: PASSWORD });
+    assert.equal(targetLogin.status, 200);
+    const beforeReset = await targetClient.get('/api/prospects');
+    assert.equal(beforeReset.status, 200);
+
+    const admin = await loginAs(adminPhone);
+    const reset = await admin.post(`/api/admin/users/${target.id}/reset-password`, { new_password: 'brand-new-pw' });
+    assert.equal(reset.status, 200);
+    assert.equal(reset.body.phone, targetPhone);
+
+    // Old session is dead.
+    const afterReset = await targetClient.get('/api/prospects');
+    assert.equal(afterReset.status, 401);
+
+    // Old password no longer works, new one does.
+    const oldPwLogin = await makeClient().post('/api/auth/login', { phone: targetPhone, password: PASSWORD });
+    assert.equal(oldPwLogin.status, 401);
+
+    const newPwLogin = await makeClient().post('/api/auth/login', { phone: targetPhone, password: 'brand-new-pw' });
+    assert.equal(newPwLogin.status, 200);
+});
+
+test('reset-password rejects a too-short password', async () => {
+    const adminPhone = '+237600333010';
+    db.createUser({ name: 'Admin4', phone: adminPhone, password: PASSWORD });
+    db.setUserActive(adminPhone, true);
+    db.setUserAdmin(adminPhone, true);
+
+    const targetPhone = '+237600333011';
+    const target = db.createUser({ name: 'Target5', phone: targetPhone, password: PASSWORD });
+
+    const admin = await loginAs(adminPhone);
+    const res = await admin.post(`/api/admin/users/${target.id}/reset-password`, { new_password: '123' });
+    assert.equal(res.status, 400);
+});

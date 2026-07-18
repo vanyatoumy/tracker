@@ -519,6 +519,31 @@ async function loadAdminUsers() {
       actionsCell.appendChild(unlockBtn);
     }
 
+    const resetBtn = document.createElement('button');
+    resetBtn.className = 'btn-ghost';
+    resetBtn.textContent = 'Reinitialiser mot de passe';
+    resetBtn.addEventListener('click', async () => {
+      const newPassword = prompt(`Nouveau mot de passe pour ${u.name} (6 caracteres minimum) :\n\nA transmettre a la personne toi-meme (appel, WhatsApp...) — rien n'est envoye automatiquement.`);
+      if (newPassword === null) return; // cancelled
+      if (newPassword.length < 6) {
+        alert('Le mot de passe doit contenir au moins 6 caracteres.');
+        return;
+      }
+      resetBtn.disabled = true;
+      try {
+        await api(`/api/admin/users/${u.id}/reset-password`, {
+          method: 'POST',
+          body: JSON.stringify({ new_password: newPassword })
+        });
+        alert(`Mot de passe reinitialise pour ${u.name}. Toutes ses sessions actives ont ete deconnectees.`);
+      } catch (err) {
+        alert(err.message);
+      } finally {
+        resetBtn.disabled = false;
+      }
+    });
+    actionsCell.appendChild(resetBtn);
+
     tbody.appendChild(tr);
   });
 

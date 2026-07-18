@@ -192,6 +192,20 @@ app.post('/api/admin/users/:id/unlock', requireAuth, requireAdmin, (req, res) =>
     } catch (err) { handleError(res, err); }
 });
 
+// Admin-assisted password reset: replaces "ask the operator to run
+// scripts/reset-password.js on the server" for the common case. The admin
+// picks the new password and tells the user out-of-band (call, WhatsApp,
+// etc.) — there's no email/SMS integration to deliver it automatically yet.
+app.post('/api/admin/users/:id/reset-password', requireAuth, requireAdmin, (req, res) => {
+    try {
+        const { new_password } = req.body;
+        if (typeof new_password !== 'string' || new_password.length < 6 || new_password.length > 200) {
+            throw new ValidationError('Mot de passe : 6 a 200 caracteres');
+        }
+        res.json(db.resetPasswordById(req.params.id, new_password));
+    } catch (err) { handleError(res, err); }
+});
+
 // ---------- PROSPECTS (all require auth, all scoped to req.userId) ----------
 
 app.get('/api/prospects', requireAuth, (req, res) => {

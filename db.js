@@ -255,6 +255,22 @@ function unlockUserById(userId) {
     return { id: user.id, name: user.name, phone: user.phone };
 }
 
+// Admin-assisted reset, exposed via POST /api/admin/users/:id/reset-password.
+// Same effect as resetPasswordByPhone (also invalidates existing sessions,
+// also clears any lockout so the new password can actually be used right
+// away) — just addressed by id since that's what the admin API works with.
+function resetPasswordById(userId, newPassword) {
+    const user = db.prepare(`SELECT id, name, phone FROM users WHERE id = ?`).get(userId);
+    if (!user) throw new NotFoundError('Compte introuvable');
+
+    const { salt, hash } = hashPassword(newPassword);
+    db.prepare(`UPDATE users SET password_hash = ?, password_salt = ?, failed_login_attempts = 0, locked_until = NULL WHERE id = ?`)
+        .run(hash, salt, userId);
+    db.prepare(`DELETE FROM sessions WHERE user_id = ?`).run(userId);
+
+    return { id: user.id, name: user.name, phone: user.phone };
+}
+
 // Called on every failed password check. Once the account hits
 // FAILED_LOGIN_LOCK_THRESHOLD consecutive failures, it's locked for
 // LOCKOUT_DURATION_MIN minutes and the counter resets.
@@ -575,6 +591,7 @@ module.exports = {
     setUserActive,
     setUserActiveById,
     unlockUserById,
+    resetPasswordById,
     registerFailedLogin,
     clearFailedLogins,
     verifyPassword,
