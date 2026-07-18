@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash   TEXT NOT NULL,
     password_salt   TEXT NOT NULL,
     is_active       INTEGER NOT NULL DEFAULT 1,
+    is_admin        INTEGER NOT NULL DEFAULT 0,
     failed_login_attempts INTEGER NOT NULL DEFAULT 0,
     locked_until    TEXT,
     created_at      TEXT NOT NULL
@@ -113,6 +114,9 @@ END;
         // in should be locked out by adding the column.
         db.exec(`ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1;`);
     }
+    if (!cols.includes('is_admin')) {
+        db.exec(`ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0;`);
+    }
     if (!cols.includes('failed_login_attempts')) {
         db.exec(`ALTER TABLE users ADD COLUMN failed_login_attempts INTEGER NOT NULL DEFAULT 0;`);
     }
@@ -173,11 +177,20 @@ function findUserByPhone(phone) {
 }
 
 function getUserById(id) {
-    return db.prepare(`SELECT id, name, phone, created_at FROM users WHERE id = ?`).get(id);
+    return db.prepare(`SELECT id, name, phone, is_active, is_admin, created_at FROM users WHERE id = ?`).get(id);
 }
 
 function listAllUsers() {
-    return db.prepare(`SELECT id, name, phone, is_active, created_at FROM users ORDER BY created_at ASC`).all();
+    return db.prepare(`SELECT id, name, phone, is_active, is_admin, created_at FROM users ORDER BY created_at ASC`).all();
+}
+
+// Fuller view for the admin API — includes lockout state, which regular
+// listAllUsers() (also used by the CLI scripts) doesn't need to show.
+function adminListUsers() {
+    return db.prepare(`
+        SELECT id, name, phone, is_active, is_admin, failed_login_attempts, locked_until, created_at
+        FROM users ORDER BY created_at ASC
+    `).all();
 }
 
 // Admin-only: reset a user's password directly (used by scripts/reset-password.js,
@@ -195,6 +208,18 @@ function resetPasswordByPhone(phone, newPassword) {
     return { id: user.id, name: user.name, phone: user.phone };
 }
 
+// Bootstrap-only: grant/revoke admin rights directly (used by
+// scripts/set-admin.js). There's no HTTP route for this — an admin can't be
+// allowed to mint other admins over the network without a lot more care
+// (audit trail, confirmation step, etc.), and right now we just need a way
+// to create the first admin at all, since is_admin defaults to 0 for everyone.
+function setUserAdmin(phone, isAdmin) {
+    const user = findUserByPhone(phone);
+    if (!user) throw new NotFoundError(`Aucun compte trouve pour le numero ${phone}`);
+    db.prepare(`UPDATE users SET is_admin = ? WHERE id = ?`).run(isAdmin ? 1 : 0, user.id);
+    return { id: user.id, name: user.name, phone: user.phone, is_admin: isAdmin ? 1 : 0 };
+}
+
 // Admin-only: activate/deactivate a user directly (used by
 // scripts/activate-account.js, not exposed via any HTTP route).
 function setUserActive(phone, active) {
@@ -207,6 +232,27 @@ function setUserActive(phone, active) {
         db.prepare(`UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = ?`).run(user.id);
     }
     return { id: user.id, name: user.name, phone: user.phone, is_active: active ? 1 : 0 };
+}
+
+// ---- id-based variants used by the admin HTTP API (server.js) ----
+// The CLI scripts use the phone-based versions above since an operator at a
+// terminal knows the phone number, not the internal id; the admin API
+// operates on ids returned by adminListUsers().
+function setUserActiveById(userId, active) {
+    const user = db.prepare(`SELECT id, name, phone FROM users WHERE id = ?`).get(userId);
+    if (!user) throw new NotFoundError('Compte introuvable');
+    db.prepare(`UPDATE users SET is_active = ? WHERE id = ?`).run(active ? 1 : 0, userId);
+    if (active) {
+        db.prepare(`UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = ?`).run(userId);
+    }
+    return { id: user.id, name: user.name, phone: user.phone, is_active: active ? 1 : 0 };
+}
+
+function unlockUserById(userId) {
+    const user = db.prepare(`SELECT id, name, phone FROM users WHERE id = ?`).get(userId);
+    if (!user) throw new NotFoundError('Compte introuvable');
+    db.prepare(`UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = ?`).run(userId);
+    return { id: user.id, name: user.name, phone: user.phone };
 }
 
 // Called on every failed password check. Once the account hits
@@ -523,8 +569,12 @@ module.exports = {
     findUserByPhone,
     getUserById,
     listAllUsers,
+    adminListUsers,
     resetPasswordByPhone,
+    setUserAdmin,
     setUserActive,
+    setUserActiveById,
+    unlockUserById,
     registerFailedLogin,
     clearFailedLogins,
     verifyPassword,

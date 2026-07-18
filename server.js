@@ -84,6 +84,17 @@ function requireAuth(req, res, next) {
     next();
 }
 
+// Must run after requireAuth (needs req.userId). Kept separate rather than
+// folded into requireAuth so ordinary routes don't pay for an extra DB
+// lookup just to check a flag they never use.
+function requireAdmin(req, res, next) {
+    const user = db.getUserById(req.userId);
+    if (!user || !user.is_admin) {
+        return res.status(403).json({ error: 'Acces reserve aux administrateurs' });
+    }
+    next();
+}
+
 // ---------- AUTH ROUTES ----------
 
 app.post('/api/auth/register', authLimiter, (req, res) => {
@@ -155,6 +166,30 @@ app.get('/api/auth/me', (req, res) => {
     if (!session) return res.status(401).json({ error: 'Session expiree' });
     const user = db.getUserById(session.user_id);
     res.json(user);
+});
+
+// ---------- ADMIN (all require auth + is_admin) ----------
+// Covers what used to require direct DB/CLI access: viewing accounts,
+// activating them, and clearing a lockout. Granting admin rights itself
+// stays CLI-only (scripts/set-admin.js) — see the comment there for why.
+
+app.get('/api/admin/users', requireAuth, requireAdmin, (req, res) => {
+    try {
+        res.json(db.adminListUsers());
+    } catch (err) { handleError(res, err); }
+});
+
+app.post('/api/admin/users/:id/activate', requireAuth, requireAdmin, (req, res) => {
+    try {
+        const active = req.body.active !== false; // defaults to true if omitted
+        res.json(db.setUserActiveById(req.params.id, active));
+    } catch (err) { handleError(res, err); }
+});
+
+app.post('/api/admin/users/:id/unlock', requireAuth, requireAdmin, (req, res) => {
+    try {
+        res.json(db.unlockUserById(req.params.id));
+    } catch (err) { handleError(res, err); }
 });
 
 // ---------- PROSPECTS (all require auth, all scoped to req.userId) ----------
