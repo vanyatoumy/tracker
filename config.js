@@ -50,5 +50,23 @@ module.exports = {
     TRUST_PROXY: parseBool(process.env.TRUST_PROXY, false),
 
     RATE_LIMIT_AUTH_MAX: parseInt10(process.env.RATE_LIMIT_AUTH_MAX, 20),
-    RATE_LIMIT_AUTH_WINDOW_MIN: parseInt10(process.env.RATE_LIMIT_AUTH_WINDOW_MIN, 15)
+    RATE_LIMIT_AUTH_WINDOW_MIN: parseInt10(process.env.RATE_LIMIT_AUTH_WINDOW_MIN, 15),
+
+    // Where local backup snapshots (gzip-compressed .db.gz files) are
+    // written before optionally being pushed offsite. See scripts/backup.js
+    // and README "Sauvegardes".
+    BACKUP_DIR: process.env.BACKUP_DIR
+        ? path.resolve(process.env.BACKUP_DIR)
+        : path.join(__dirname, 'data', 'backups'),
+
+    // How many days of local backups to keep before scripts/backup.js
+    // prunes them. Offsite copies are not pruned by this script — manage
+    // retention on the remote side (or leave unset to keep everything).
+    BACKUP_RETENTION_DAYS: parseInt10(process.env.BACKUP_RETENTION_DAYS, 14),
+
+    // Optional rsync/scp destination for offsite backups, e.g.
+    // "user@backup-host:/srv/backups/mlm-tracker/". Requires passwordless
+    // SSH key auth to be already configured on the host (out of scope for
+    // this app). If unset, backups stay local only.
+    BACKUP_REMOTE: process.env.BACKUP_REMOTE || ''
 };

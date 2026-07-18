@@ -65,33 +65,37 @@ regulierement (copier le fichier suffit, pas besoin d'export).
 
 - Pas de moteur de calcul de commissions / structure de downline (Layer 2)
 - Pas d'import en masse depuis Excel (a ajouter plus tard — voir note ci-dessous)
-- Pas de recuperation de mot de passe oublie — en cas d'oubli, il faut
-  recreer un compte pour l'instant
+- Pas de recuperation de mot de passe **en libre-service** (pas d'email/SMS) —
+  mais un administrateur peut reinitialiser le mot de passe de n'importe quel
+  compte depuis le dashboard admin ou en CLI (voir ci-dessous)
 - Sessions stockees dans SQLite (pas un store distribue) — suffisant pour un
   seul serveur
 
-## Compte oublie / mot de passe perdu
+## Comptes admin, activation, et mot de passe oublie
 
-Pas de recuperation en libre-service pour l'instant (ca demanderait un envoi
-d'email ou de SMS, donc un service tiers payant a mettre en place). En
-attendant, si toi ou un downline est bloque, lance depuis le serveur :
+Les nouveaux comptes sont crees **inactifs** : ils ne peuvent pas se connecter
+tant qu'un administrateur ne les a pas actives. Le tout premier administrateur
+doit etre cree en CLI (bootstrap volontairement hors HTTP, pour eviter qu'un
+admin puisse en creer d'autres a distance sans garde-fou) :
 
 ```bash
-npm run reset-password
+node scripts/activate-account.js +237677123456   # active un compte
+node scripts/set-admin.js +237677123456           # accorde les droits admin
 ```
 
-Ca liste les comptes existants, demande le numero concerne et un nouveau mot
-de passe, puis reinitialise — en deconnectant au passage toute session active
-sur ce compte par securite. Fonctionne aussi en une commande directe :
+Une fois qu'un compte a les droits admin, tout le reste se fait depuis
+l'interface web (onglet "Admin", visible uniquement pour les administrateurs) :
+lister les comptes, activer/desactiver, debloquer un compte verrouille (4
+echecs de connexion consecutifs = blocage 15 minutes), et reinitialiser le mot
+de passe d'un compte (deconnecte automatiquement toute session active sur ce
+compte).
+
+Le script CLI direct reste disponible aussi, pour un acces sans passer par le
+web :
 
 ```bash
 node scripts/reset-password.js +237677123456 nouveauMotDePasse
 ```
-
-**Important** : ce script n'est volontairement pas accessible depuis
-l'interface web ou une route HTTP — il ne peut etre execute que par quelqu'un
-ayant un acces direct au serveur (toi). C'est une securite : personne ne peut
-reinitialiser un mot de passe a distance sans passer par toi.
 
 ## Note sur l'import futur
 
@@ -113,9 +117,13 @@ suivi-prospection/
 │   ├── style.css    # Theme sombre / rouge, Montserrat
 │   └── app.js       # Logique frontend (aucun framework, JS natif)
 ├── scripts/
-│   ├── reset-password.js       # Reinitialisation manuelle d'un mot de passe
+│   ├── reset-password.js       # Reinitialisation manuelle d'un mot de passe (CLI)
+│   ├── activate-account.js     # Activation manuelle d'un compte (CLI)
+│   ├── set-admin.js            # Octroi/retrait des droits admin (CLI, bootstrap)
+│   ├── backup.js                # Sauvegarde automatisee (snapshot + offsite)
 │   └── migrate-v2-stages.js    # Migration schema v1 -> v2 (7 etapes, profil Facebook)
-└── data/            # Cree automatiquement — contient tracker.db
+├── tests/           # Suite de tests automatises (node --test)
+└── data/            # Cree automatiquement — contient tracker.db et backups/
 ```
 
 ## Modele de donnees
@@ -148,10 +156,16 @@ n'ecrit jamais directement le champ `stage`, il insere uniquement dans
 | GET | `/api/stats/benchmark` | Temps median de conversion |
 | GET | `/api/stats/sources` | Repartition et taux de conversion par source |
 | GET | `/api/stats/countries` | Repartition et taux de conversion par pays |
+| GET | `/api/admin/users` | Liste tous les comptes (admin uniquement) |
+| POST | `/api/admin/users/:id/activate` | Active/desactive un compte (`{active}`, admin uniquement) |
+| POST | `/api/admin/users/:id/unlock` | Debloque un compte verrouille (admin uniquement) |
+| POST | `/api/admin/users/:id/reset-password` | Reinitialise le mot de passe d'un compte (`{new_password}`, admin uniquement) |
 
 Toutes les routes `/api/prospects*`, `/api/reminders`, et `/api/stats/*`
 necessitent une session active (cookie), et ne retournent jamais les donnees
-d'un autre utilisateur — verifie par un test d'isolation avant livraison.
+d'un autre utilisateur — verifie par un test d'isolation avant livraison. Les
+routes `/api/admin/*` necessitent en plus que le compte connecte ait
+`is_admin = 1` (403 sinon).
 
 ## Tester avec plusieurs comptes
 
@@ -167,3 +181,47 @@ telle quelle sur n'importe quel hebergeur supportant Node 22+ (Railway, Render,
 un VPS). Le seul point d'attention : `data/tracker.db` doit vivre sur un disque
 persistant (pas un systeme de fichiers ephemere), sinon les donnees disparaissent
 a chaque redeploiement.
+
+### Sur un VPS (deploiement type)
+
+1. Installe Node 22+ (ex: via [fnm](https://github.com/Schniz/fnm) ou le
+   gestionnaire de paquets du systeme).
+2. Clone le depot, `npm install`, copie `.env.example` vers `.env` et ajuste
+   au minimum `NODE_ENV=production`, `TRUST_PROXY=true` (si derriere nginx/un
+   reverse proxy), et les variables de sauvegarde (voir ci-dessous).
+3. Fais tourner l'app avec un supervisor qui la relance automatiquement en cas
+   de crash ou de redemarrage du serveur (`systemd`, `pm2`, ou equivalent) —
+   ex. un service systemd avec `ExecStart=/usr/bin/node server.js` et
+   `Restart=on-failure`.
+4. Mets un reverse proxy (nginx, Caddy) devant pour le TLS/HTTPS ; l'app
+   elle-meme n'ecoute qu'en HTTP en interne.
+5. Cree le premier administrateur en CLI, directement sur le serveur (voir
+   "Comptes admin" plus haut).
+
+### Sauvegardes
+
+`scripts/backup.js` prend un instantane coherent de la base (via `VACUUM INTO`
+SQLite — sans arreter le serveur ni risquer de copier le fichier en pleine
+ecriture), le compresse en `.db.gz`, purge les sauvegardes locales plus
+vieilles que `BACKUP_RETENTION_DAYS`, puis pousse la copie hors du serveur via
+`rsync`/`scp` si `BACKUP_REMOTE` est configure (voir `.env.example`).
+
+A lancer manuellement pour tester :
+
+```bash
+node scripts/backup.js
+```
+
+En production, planifie-le via **cron systeme** (volontairement decouple du
+processus Node — un crash de l'app ne doit pas arreter les sauvegardes, et
+inversement) :
+
+```cron
+0 3 * * * cd /chemin/vers/mlm-tracker && /usr/bin/node scripts/backup.js >> /var/log/mlm-backup.log 2>&1
+```
+
+Prerequis pour la copie hors-site : un acces SSH par cle (sans mot de passe)
+deja configure entre le VPS et la machine/le stockage de destination — c'est
+une etape a faire une fois, manuellement, hors de ce projet. Si `BACKUP_REMOTE`
+n'est pas defini, les sauvegardes restent locales uniquement (deconseille en
+production : en cas de perte du VPS, tu perds aussi les sauvegardes).

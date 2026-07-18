@@ -10,7 +10,8 @@
     "start": "node server.js",
     "test": "node --test",
     "reset-password": "node scripts/reset-password.js",
-    "migrate": "node scripts/migrate-v2-stages.js"
+    "migrate": "node scripts/migrate-v2-stages.js",
+    "backup": "node scripts/backup.js"
   },
   "keywords": [],
   "author": "",
