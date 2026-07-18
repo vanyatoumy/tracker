@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS prospects (
     owner_id        TEXT NOT NULL,
     name            TEXT NOT NULL,
     phone           TEXT,                    -- E.164 format, e.g. +237677123456
+    alt_phone       TEXT,                    -- optional second number for the same person (E.164)
     country         TEXT,
     city            TEXT,
     quarter         TEXT,
@@ -122,6 +123,13 @@ END;
     }
     if (!cols.includes('locked_until')) {
         db.exec(`ALTER TABLE users ADD COLUMN locked_until TEXT;`);
+    }
+})();
+
+(function migrateProspectColumns() {
+    const cols = db.prepare(`PRAGMA table_info(prospects)`).all().map(c => c.name);
+    if (!cols.includes('alt_phone')) {
+        db.exec(`ALTER TABLE prospects ADD COLUMN alt_phone TEXT;`);
     }
 })();
 
@@ -323,7 +331,7 @@ function deleteSession(token) {
 // ============================================
 // PROSPECTS
 // ============================================
-function createProspect(ownerId, { name, phone, country, city, quarter, facebook_profile_url, source, interest_type, next_followup_at }) {
+function createProspect(ownerId, { name, phone, alt_phone, country, city, quarter, facebook_profile_url, source, interest_type, next_followup_at }) {
     const id = randomUUID();
     const ts = now();
 
@@ -333,10 +341,10 @@ function createProspect(ownerId, { name, phone, country, city, quarter, facebook
     db.exec('BEGIN IMMEDIATE;');
     try {
         db.prepare(`
-            INSERT INTO prospects (id, owner_id, name, phone, country, city, quarter, facebook_profile_url, stage, stage_updated_at,
+            INSERT INTO prospects (id, owner_id, name, phone, alt_phone, country, city, quarter, facebook_profile_url, stage, stage_updated_at,
                                     source, interest_type, is_archived, next_followup_at, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'nouveau', ?, ?, ?, 0, ?, ?, ?)
-        `).run(id, ownerId, name, phone || null, country || null, city || null, quarter || null, facebook_profile_url || null,
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'nouveau', ?, ?, ?, 0, ?, ?, ?)
+        `).run(id, ownerId, name, phone || null, alt_phone || null, country || null, city || null, quarter || null, facebook_profile_url || null,
                ts, source || null, interest_type || null, next_followup_at || null, ts, ts);
 
         db.prepare(`
@@ -351,6 +359,66 @@ function createProspect(ownerId, { name, phone, country, city, quarter, facebook
     }
 
     return getProspect(ownerId, id);
+}
+
+// Bulk-inserts prospects (used by the CSV contact import). Contacts are
+// expected to already be validated (valid E.164 phone, non-junk name) by the
+// caller — this function's only extra responsibility is deduplication:
+// - within the batch itself (two rows with the same phone)
+// - against phones the owner already has in their pipeline
+// Both cases are silently skipped and counted, not treated as errors, since
+// re-running the same import (e.g. an updated contacts export) is expected
+// to be a normal, repeatable operation.
+function bulkImportProspects(ownerId, contacts) {
+    // Dedup is checked against every number already on file for this owner,
+    // whether it's someone's primary or secondary phone — a number that's
+    // already reachable through one contact shouldn't create another.
+    const existing = new Set();
+    for (const r of db.prepare(`SELECT phone, alt_phone FROM prospects WHERE owner_id = ?`).all(ownerId)) {
+        if (r.phone) existing.add(r.phone);
+        if (r.alt_phone) existing.add(r.alt_phone);
+    }
+
+    let imported = 0;
+    let skippedDuplicate = 0;
+
+    db.exec('BEGIN IMMEDIATE;');
+    try {
+        for (const c of contacts) {
+            // The primary phone colliding means this person is already in the
+            // pipeline — skip the whole contact, same as before.
+            if (existing.has(c.phone)) {
+                skippedDuplicate++;
+                continue;
+            }
+            // A colliding secondary number doesn't disqualify the contact —
+            // just drop that one number rather than losing the whole person.
+            const altPhone = (c.alt_phone && !existing.has(c.alt_phone)) ? c.alt_phone : null;
+
+            const id = randomUUID();
+            const ts = now();
+            db.prepare(`
+                INSERT INTO prospects (id, owner_id, name, phone, alt_phone, country, city, quarter, facebook_profile_url, stage, stage_updated_at,
+                                        source, interest_type, is_archived, next_followup_at, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 'nouveau', ?, ?, NULL, 0, NULL, ?, ?)
+            `).run(id, ownerId, c.name, c.phone, altPhone, c.country || null, ts, c.source || null, ts, ts);
+
+            db.prepare(`
+                INSERT INTO stage_history (id, prospect_id, from_stage, to_stage, changed_at, note)
+                VALUES (?, ?, NULL, 'nouveau', ?, NULL)
+            `).run(randomUUID(), id, ts);
+
+            existing.add(c.phone);
+            if (altPhone) existing.add(altPhone);
+            imported++;
+        }
+        db.exec('COMMIT;');
+    } catch (err) {
+        db.exec('ROLLBACK;');
+        throw err;
+    }
+
+    return { imported, skipped_duplicate: skippedDuplicate };
 }
 
 function getProspect(ownerId, id) {
@@ -402,7 +470,7 @@ function updateProspect(ownerId, id, fields) {
     const existing = getProspect(ownerId, id);
     if (!existing) throw new NotFoundError('Contact introuvable');
 
-    const allowed = ['name', 'phone', 'country', 'city', 'quarter', 'facebook_profile_url', 'source', 'interest_type', 'next_followup_at'];
+    const allowed = ['name', 'phone', 'alt_phone', 'country', 'city', 'quarter', 'facebook_profile_url', 'source', 'interest_type', 'next_followup_at'];
     const sets = [];
     const values = [];
     for (const key of allowed) {
@@ -622,6 +690,7 @@ module.exports = {
     getSession,
     deleteSession,
     createProspect,
+    bulkImportProspects,
     getProspect,
     listProspects,
     updateProspect,

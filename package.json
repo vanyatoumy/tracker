@@ -20,6 +20,7 @@
     "cookie-parser": "^1.4.7",
     "express": "^5.2.1",
     "express-rate-limit": "^7.4.1",
+    "google-libphonenumber": "^3.2.44",
     "helmet": "^8.0.0"
   }
 }

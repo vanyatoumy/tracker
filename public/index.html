@@ -68,6 +68,7 @@
   </nav>
   <div class="topbar-right">
     <span id="currentUserInfo" class="current-user-info"></span>
+    <button id="importBtn" class="btn-ghost">Importer des contacts</button>
     <button id="addProspectBtn" class="btn-primary">+ Ajouter un contact</button>
     <button id="logoutBtn" class="btn-ghost" title="Deconnexion">⏻</button>
   </div>
@@ -188,6 +189,13 @@
         </div>
       </label>
 
+      <label>Telephone secondaire (optionnel)
+        <div class="phone-row">
+          <select name="alt_phone_dial" id="addAltPhoneDial"></select>
+          <input type="tel" name="alt_phone_local" placeholder="677123456">
+        </div>
+      </label>
+
       <div class="field-group-title">Localisation (optionnel)</div>
       <label>Pays
         <select name="country" id="addCountry"></select>
@@ -226,6 +234,30 @@
   </div>
 </div>
 
+<!-- IMPORT CONTACTS MODAL -->
+<div id="importModal" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>Importer des contacts</h2>
+      <button class="modal-close" data-close>&times;</button>
+    </div>
+    <div class="import-body">
+      <p class="import-hint">
+        Exporte tes contacts depuis <a href="https://contacts.google.com/" target="_blank" rel="noopener">Google Contacts</a>
+        (format CSV Google) et depose le fichier tel quel — aucune conversion
+        n'est necessaire. Les contacts sans nom exploitable, avec un numero
+        invalide, ou deja presents dans ton pipeline sont automatiquement
+        ignores.
+      </p>
+      <input type="file" id="importFileInput" accept=".csv,text/csv">
+      <div id="importStatus" class="import-status hidden"></div>
+      <div class="modal-actions">
+        <button id="importConfirmBtn" class="btn-primary" disabled>Importer</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- PROSPECT DETAIL MODAL -->
 <div id="detailModal" class="modal-overlay hidden">
   <div class="modal modal-wide">
@@ -257,6 +289,15 @@
               <input type="tel" id="detailPhoneLocal" placeholder="677123456">
             </div>
           </label>
+        </div>
+        <div class="field-row">
+          <label>Telephone secondaire (optionnel)
+            <div class="phone-row">
+              <select id="detailAltPhoneDial"></select>
+              <input type="tel" id="detailAltPhoneLocal" placeholder="677123456">
+            </div>
+          </label>
+          <a id="detailAltWaBtn" class="card-wa hidden" href="#" target="_blank" rel="noopener" title="Ouvrir WhatsApp">&#x1F4AC;</a>
         </div>
         <div class="two-col">
           <label>Pays

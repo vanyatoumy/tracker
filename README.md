@@ -64,7 +64,9 @@ regulierement (copier le fichier suffit, pas besoin d'export).
 ## Ce que l'app ne fait pas (volontairement, pour l'instant)
 
 - Pas de moteur de calcul de commissions / structure de downline (Layer 2)
-- Pas d'import en masse depuis Excel (a ajouter plus tard — voir note ci-dessous)
+- Pas d'import direct depuis Excel — seulement depuis un CSV au format
+  `Name, Country Code, Phone Number, Country` (voir "Importer des contacts"
+  ci-dessous)
 - Pas de recuperation de mot de passe **en libre-service** (pas d'email/SMS) —
   mais un administrateur peut reinitialiser le mot de passe de n'importe quel
   compte depuis le dashboard admin ou en CLI (voir ci-dessous)
@@ -97,13 +99,32 @@ web :
 node scripts/reset-password.js +237677123456 nouveauMotDePasse
 ```
 
-## Note sur l'import futur
+## Importer des contacts en masse (depuis Google Contacts)
 
-Quand tu voudras importer d'anciens prospects depuis Excel/WhatsApp, la question
-a trancher sera : est-ce qu'un prospect importe (sans vraie date de creation
-connue) doit compter dans le calcul du "temps median de conversion" ? Recommande :
-non, ou alors avec une date de creation explicitement marquee comme "estimee"
-pour ne pas fausser silencieusement la statistique.
+Le bouton **"Importer des contacts"** (en haut de l'app) accepte un fichier
+CSV avec les colonnes `Name, Country Code, Phone Number, Country` — c'est
+exactement le format produit par l'outil `Google_csv_contact_to_mlm_import_format`
+(export Google Contacts -> numeros valides et normalises par pays).
+
+Le comportement est volontairement conservateur :
+- Les lignes sans nom exploitable (`..`, `...`, un contact uniquement compose
+  d'emojis) sont ignorees.
+- Les numeros invalides sont ignores.
+- Les doublons — dans le fichier lui-meme, ou deja presents dans ton
+  pipeline — sont ignores silencieusement (comptes affiches dans le resume).
+  Ca rend l'operation repetable : ré-importer le meme fichier (ou un export
+  mis a jour) n'importe pas deux fois les memes personnes.
+
+Chaque contact importe entre dans le pipeline avec la source "Annuaire
+telephonique" et l'etape "Contact" (comme un ajout manuel) — rien d'autre
+n'est pre-rempli (pas de ville/quartier/relance), a completer au fil de la
+prospection.
+
+**Note sur les statistiques** : un contact importe n'a pas de vraie date de
+"premier contact" connue — sa `created_at` est la date de l'import. Si tu
+importes un gros volume d'un coup, ca peut fausser temporairement le "temps
+median de conversion" (Statistiques) tant que ces contacts n'ont pas encore
+progresse dans le pipeline.
 
 ## Structure du projet
 
@@ -145,6 +166,7 @@ n'ecrit jamais directement le champ `stage`, il insere uniquement dans
 | GET | `/api/auth/me` | Utilisateur courant (401 si non connecte) |
 | GET | `/api/prospects` | Liste, filtrable : `?archived=1`, `?stage=`, `?source=`, `?interest_type=`, `?country=`, `?city=`, `?quarter=`, `?search=` |
 | POST | `/api/prospects` | Creer un prospect |
+| POST | `/api/prospects/import` | Import en masse (`{rows}`, format CSV Google Contacts converti) — voir "Importer des contacts" |
 | GET | `/api/prospects/:id` | Detail d'un prospect |
 | PATCH | `/api/prospects/:id` | Modifier nom/telephone/localisation/source/relance |
 | DELETE | `/api/prospects/:id` | Supprimer definitivement (distinct de l'archivage) |

@@ -7,6 +7,7 @@ const db = require('./db');
 const config = require('./config');
 const validate = require('./validate');
 const { ValidationError, AuthError } = require('./errors');
+const { expandContactRows } = require('./google-contacts-import');
 
 const app = express();
 const PORT = config.PORT;
@@ -39,7 +40,18 @@ app.use(helmet({
         }
     }
 }));
-app.use(express.json({ limit: '100kb' }));
+// Contact imports send a JSON array of raw CSV rows, which can run well
+// past the normal 100kb request limit for a large Google Contacts export
+// (up to 5000 rows, capped in the import route). Every other route stays on
+// the tight default. Only one of these ever runs per request — chaining two
+// express.json() instances on the same request would try to read the body
+// stream twice.
+const jsonBodyDefault = express.json({ limit: '100kb' });
+const jsonBodyImport = express.json({ limit: '10mb' });
+app.use((req, res, next) => {
+    const parser = req.path === '/api/prospects/import' ? jsonBodyImport : jsonBodyDefault;
+    parser(req, res, next);
+});
 app.use((req, res, next) => { if (!req.body || typeof req.body !== 'object') req.body = {}; next(); });
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -229,6 +241,7 @@ app.post('/api/prospects', requireAuth, (req, res) => {
         const body = req.body || {};
         const name = validate.str(body.name, 'Le nom', { required: true, maxLength: 200 });
         const phone = validate.phone(body.phone, 'Le telephone');
+        const alt_phone = validate.phone(body.alt_phone, 'Le telephone secondaire');
         const country = validate.str(body.country, 'Le pays', { maxLength: 100 });
         const city = validate.str(body.city, 'La ville', { maxLength: 100 });
         const quarter = validate.str(body.quarter, 'Le quartier', { maxLength: 100 });
@@ -238,8 +251,44 @@ app.post('/api/prospects', requireAuth, (req, res) => {
         const facebook_profile_url = validate.url(body.facebook_profile_url, 'Le lien Facebook');
 
         res.status(201).json(db.createProspect(req.userId, {
-            name, phone, country, city, quarter, facebook_profile_url, source, interest_type, next_followup_at
+            name, phone, alt_phone, country, city, quarter, facebook_profile_url, source, interest_type, next_followup_at
         }));
+    } catch (err) { handleError(res, err); }
+});
+
+// Bulk import straight from a Google Contacts CSV export. Accepts an array
+// of raw row objects as produced by parsing that CSV client-side (headers
+// like "First Name", "Last Name", "Phone 1 - Value", ...) — phone parsing,
+// validation, and country lookup all happen here via google-libphonenumber,
+// so users can upload the unmodified Google export with no separate
+// conversion step.
+app.post('/api/prospects/import', requireAuth, (req, res) => {
+    try {
+        const rows = (req.body && req.body.rows) || [];
+        if (!Array.isArray(rows)) {
+            throw new ValidationError('rows doit etre un tableau');
+        }
+        if (rows.length > 5000) {
+            throw new ValidationError('Maximum 5000 lignes par import');
+        }
+
+        const {
+            candidates,
+            skippedNoName,
+            skippedInvalidPhone,
+            skippedDuplicateInFile
+        } = expandContactRows(rows);
+
+        const { imported, skipped_duplicate } = db.bulkImportProspects(req.userId, candidates);
+
+        res.json({
+            total_rows: rows.length,
+            imported,
+            skipped_duplicate_existing: skipped_duplicate,
+            skipped_duplicate_in_file: skippedDuplicateInFile,
+            skipped_invalid_phone: skippedInvalidPhone,
+            skipped_no_name: skippedNoName
+        });
     } catch (err) { handleError(res, err); }
 });
 
@@ -255,6 +304,7 @@ app.patch('/api/prospects/:id', requireAuth, (req, res) => {
         const fields = {};
         if ('name' in body) fields.name = validate.str(body.name, 'Le nom', { required: true, maxLength: 200 });
         if ('phone' in body) fields.phone = validate.phone(body.phone, 'Le telephone');
+        if ('alt_phone' in body) fields.alt_phone = validate.phone(body.alt_phone, 'Le telephone secondaire');
         if ('country' in body) fields.country = validate.str(body.country, 'Le pays', { maxLength: 100 });
         if ('city' in body) fields.city = validate.str(body.city, 'La ville', { maxLength: 100 });
         if ('quarter' in body) fields.quarter = validate.str(body.quarter, 'Le quartier', { maxLength: 100 });

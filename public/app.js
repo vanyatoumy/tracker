@@ -273,6 +273,11 @@ function renderCard(p) {
     ? `<a class="card-wa" href="${escapeHtml(p.facebook_profile_url)}" target="_blank" rel="noopener" title="Ouvrir le profil Facebook" onclick="event.stopPropagation()">&#x1F310;</a>`
     : '';
 
+  const altWa = waLinkFromPhone(p.alt_phone);
+  const altWaLink = altWa
+    ? `<a class="card-wa" href="${altWa}" target="_blank" rel="noopener" title="Numero secondaire — WhatsApp" onclick="event.stopPropagation()">&#x1F4AC;²</a>`
+    : '';
+
   let followupHtml = '';
   if (p.next_followup_at) {
     const isPast = new Date(p.next_followup_at) <= new Date();
@@ -284,7 +289,7 @@ function renderCard(p) {
   card.innerHTML = `
     <div class="card-top">
       <p class="card-name">${escapeHtml(p.name)}</p>
-      ${waLink}${fbLink}
+      ${waLink}${altWaLink}${fbLink}
     </div>
     <div class="card-meta">
       ${p.source ? `<span class="tag">${SOURCE_LABELS[p.source] || p.source}</span>` : ''}
@@ -558,10 +563,13 @@ async function loadAdminUsers() {
 const addModal = document.getElementById('addModal');
 document.getElementById('addProspectBtn').addEventListener('click', () => {
   document.getElementById('addPhoneDial').classList.add('dial-select');
+  document.getElementById('addAltPhoneDial').classList.add('dial-select');
   document.getElementById('addFbGroup').classList.add('hidden');
+  populateDialSelects();
   addModal.classList.remove('hidden');
 });
 document.getElementById('addPhoneDial').classList.add('dial-select');
+document.getElementById('addAltPhoneDial').classList.add('dial-select');
 document.getElementById('addCountry').classList.add('country-select');
 document.getElementById('addSource').addEventListener('change', (e) => {
   document.getElementById('addFbGroup').classList.toggle('hidden', e.target.value !== 'facebook');
@@ -571,9 +579,11 @@ document.getElementById('addForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const fd = new FormData(e.target);
   const phone = buildE164(fd.get('phone_dial'), fd.get('phone_local'));
+  const alt_phone = buildE164(fd.get('alt_phone_dial'), fd.get('alt_phone_local'));
   const payload = {
     name: fd.get('name'),
     phone,
+    alt_phone,
     country: fd.get('country') || null,
     city: fd.get('city') || null,
     quarter: fd.get('quarter') || null,
@@ -588,6 +598,135 @@ document.getElementById('addForm').addEventListener('submit', async (e) => {
   // Land directly on the new contact's detail view — this is the fastest path to
   // hitting "Contacter sur WhatsApp" right after adding someone.
   await openDetail(created.id);
+});
+
+// ============================================
+// IMPORT CONTACTS (CSV)
+// ============================================
+// Minimal RFC4180-ish CSV parser: handles quoted fields (with embedded
+// commas/newlines/escaped quotes) as well as plain unquoted fields. Good
+// enough for the contact-export files this feature targets, without pulling
+// in a parsing library for one screen.
+function parseCsv(text) {
+  const rows = [];
+  let row = [];
+  let field = '';
+  let inQuotes = false;
+  // Normalize line endings so \r\n and \r don't produce phantom empty rows.
+  const s = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (s[i + 1] === '"') { field += '"'; i++; }
+        else inQuotes = false;
+      } else {
+        field += ch;
+      }
+    } else if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === ',') {
+      row.push(field); field = '';
+    } else if (ch === '\n') {
+      row.push(field); field = '';
+      rows.push(row); row = [];
+    } else {
+      field += ch;
+    }
+  }
+  if (field.length || row.length) { row.push(field); rows.push(row); }
+
+  const filtered = rows.filter(r => r.some(c => c.trim() !== ''));
+  if (filtered.length === 0) return [];
+  const header = filtered[0].map(h => h.trim());
+  return filtered.slice(1).map(r => {
+    const obj = {};
+    header.forEach((h, idx) => { obj[h] = (r[idx] ?? '').trim(); });
+    return obj;
+  });
+}
+
+const importModal = document.getElementById('importModal');
+const importStatus = document.getElementById('importStatus');
+const importFileInput = document.getElementById('importFileInput');
+const importConfirmBtn = document.getElementById('importConfirmBtn');
+
+// Rows parsed from the selected file, held until the user confirms the
+// import by clicking "Importer" — selecting a file only previews it.
+let pendingImportRows = null;
+
+function resetImportState() {
+  pendingImportRows = null;
+  importConfirmBtn.disabled = true;
+  importConfirmBtn.textContent = 'Importer';
+}
+
+document.getElementById('importBtn').addEventListener('click', () => {
+  importFileInput.value = '';
+  importStatus.classList.add('hidden');
+  importStatus.classList.remove('error');
+  resetImportState();
+  importModal.classList.remove('hidden');
+});
+
+importFileInput.addEventListener('change', async () => {
+  resetImportState();
+  const file = importFileInput.files[0];
+  if (!file) {
+    importStatus.classList.add('hidden');
+    return;
+  }
+
+  importStatus.classList.remove('hidden', 'error');
+  importStatus.textContent = 'Lecture du fichier…';
+
+  try {
+    const text = await file.text();
+    const rows = parseCsv(text);
+    if (rows.length === 0) {
+      importStatus.classList.add('error');
+      importStatus.textContent = 'Fichier vide ou illisible.';
+      return;
+    }
+
+    pendingImportRows = rows;
+    importConfirmBtn.disabled = false;
+    importStatus.classList.remove('error');
+    importStatus.textContent = `${rows.length} contact(s) detecte(s) dans le fichier. Clique sur "Importer" pour continuer.`;
+  } catch (err) {
+    importStatus.classList.add('error');
+    importStatus.textContent = err.message || 'Impossible de lire le fichier.';
+  }
+});
+
+importConfirmBtn.addEventListener('click', async () => {
+  if (!pendingImportRows) return;
+
+  importConfirmBtn.disabled = true;
+  importConfirmBtn.textContent = 'Import en cours…';
+  importStatus.classList.remove('hidden', 'error');
+  importStatus.textContent = 'Import en cours…';
+
+  try {
+    const result = await api('/api/prospects/import', { method: 'POST', body: JSON.stringify({ rows: pendingImportRows }) });
+
+    importStatus.textContent =
+      `${result.imported} contact(s) importe(s) sur ${result.total_rows}. ` +
+      `Ignores : ${result.skipped_duplicate_existing} deja dans le pipeline, ` +
+      `${result.skipped_duplicate_in_file} doublons dans le fichier, ` +
+      `${result.skipped_invalid_phone} numero(s) invalide(s), ` +
+      `${result.skipped_no_name} sans nom exploitable.`;
+
+    resetImportState();
+    importFileInput.value = '';
+    await refreshAll();
+  } catch (err) {
+    importStatus.classList.add('error');
+    importStatus.textContent = err.message || "Echec de l'import.";
+    importConfirmBtn.disabled = false;
+    importConfirmBtn.textContent = 'Importer';
+  }
 });
 
 // ============================================
@@ -638,9 +777,23 @@ async function openDetail(id) {
   // phone + address fields (editable)
   const { dial, local } = splitE164(p.phone);
   document.getElementById('detailPhoneDial').classList.add('dial-select');
+  document.getElementById('detailAltPhoneDial').classList.add('dial-select');
   populateDialSelects();
   document.getElementById('detailPhoneDial').value = dial;
   document.getElementById('detailPhoneLocal').value = local;
+
+  const altSplit = splitE164(p.alt_phone);
+  document.getElementById('detailAltPhoneDial').value = p.alt_phone ? altSplit.dial : '+237';
+  document.getElementById('detailAltPhoneLocal').value = p.alt_phone ? altSplit.local : '';
+
+  const altWaBtn = document.getElementById('detailAltWaBtn');
+  const altWa = waLinkFromPhone(p.alt_phone);
+  if (altWa) {
+    altWaBtn.href = altWa;
+    altWaBtn.classList.remove('hidden');
+  } else {
+    altWaBtn.classList.add('hidden');
+  }
 
   document.getElementById('detailCountry').classList.add('country-select');
   populateCountrySelects();
@@ -678,6 +831,9 @@ document.getElementById('saveDetails').addEventListener('click', async () => {
   const dial = document.getElementById('detailPhoneDial').value;
   const local = document.getElementById('detailPhoneLocal').value;
   const phone = buildE164(dial, local);
+  const altDial = document.getElementById('detailAltPhoneDial').value;
+  const altLocal = document.getElementById('detailAltPhoneLocal').value;
+  const alt_phone = buildE164(altDial, altLocal);
   const followup = document.getElementById('detailFollowup').value;
   const name = document.getElementById('detailNameInput').value.trim();
   const source = document.getElementById('detailSource').value;
@@ -690,6 +846,7 @@ document.getElementById('saveDetails').addEventListener('click', async () => {
       body: JSON.stringify({
         name,
         phone,
+        alt_phone,
         country: document.getElementById('detailCountry').value || null,
         city: document.getElementById('detailCity').value || null,
         quarter: document.getElementById('detailQuarter').value || null,
@@ -764,13 +921,14 @@ document.querySelectorAll('[data-close]').forEach(btn => {
   btn.addEventListener('click', () => {
     addModal.classList.add('hidden');
     detailModal.classList.add('hidden');
+    importModal.classList.add('hidden');
   });
 });
-[addModal, detailModal].forEach(m => {
+[addModal, detailModal, importModal].forEach(m => {
   m.addEventListener('click', (e) => { if (e.target === m) m.classList.add('hidden'); });
 });
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') { addModal.classList.add('hidden'); detailModal.classList.add('hidden'); }
+  if (e.key === 'Escape') { addModal.classList.add('hidden'); detailModal.classList.add('hidden'); importModal.classList.add('hidden'); }
 });
 
 // ============================================
