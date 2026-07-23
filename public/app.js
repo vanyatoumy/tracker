@@ -203,23 +203,35 @@ document.getElementById('logoutBtn').addEventListener('click', async () => {
   showAuthScreen();
 });
 
-const moreMenuBtn = document.getElementById('moreMenuBtn');
-const moreMenu = document.getElementById('moreMenu');
-moreMenuBtn.addEventListener('click', (e) => {
-  e.stopPropagation();
-  const willOpen = moreMenu.classList.contains('hidden');
-  moreMenu.classList.toggle('hidden', !willOpen);
-  moreMenuBtn.setAttribute('aria-expanded', String(willOpen));
-});
-document.addEventListener('click', (e) => {
-  if (!moreMenu.classList.contains('hidden') && !moreMenu.contains(e.target) && e.target !== moreMenuBtn) {
-    moreMenu.classList.add('hidden');
-    moreMenuBtn.setAttribute('aria-expanded', 'false');
+function setupMenu(btnId, menuId, { closeOnButtonClick = true } = {}) {
+  const btn = document.getElementById(btnId);
+  const menu = document.getElementById(menuId);
+
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const willOpen = menu.classList.contains('hidden');
+    document.querySelectorAll('.dropdown-menu').forEach(m => {
+      if (m !== menu) m.classList.add('hidden');
+    });
+    menu.classList.toggle('hidden', !willOpen);
+    btn.setAttribute('aria-expanded', String(willOpen));
+  });
+  document.addEventListener('click', (e) => {
+    if (!menu.classList.contains('hidden') && !menu.contains(e.target) && e.target !== btn) {
+      menu.classList.add('hidden');
+      btn.setAttribute('aria-expanded', 'false');
+    }
+  });
+  if (closeOnButtonClick) {
+    menu.addEventListener('click', (e) => {
+      if (e.target.tagName === 'BUTTON') menu.classList.add('hidden');
+    });
   }
-});
-moreMenu.addEventListener('click', (e) => {
-  if (e.target.tagName === 'BUTTON') moreMenu.classList.add('hidden');
-});
+}
+
+setupMenu('moreMenuBtn', 'moreMenu');
+setupMenu('filterMenuBtn', 'filterMenu', { closeOnButtonClick: false });
+setupMenu('notifBtn', 'notifMenu');
 
 async function bootApp() {
   showApp();
@@ -355,12 +367,13 @@ let filterDebounce;
 ['filterSearch', 'filterCity'].forEach(id => {
   document.getElementById(id).addEventListener('input', () => {
     clearTimeout(filterDebounce);
-    filterDebounce = setTimeout(() => { activeFilters = readFilters(); loadProspects(); }, 300);
+    filterDebounce = setTimeout(() => { activeFilters = readFilters(); updateFilterBadge(); loadProspects(); }, 300);
   });
 });
 ['filterSource', 'filterInterest', 'filterCountry'].forEach(id => {
   document.getElementById(id).addEventListener('change', () => {
     activeFilters = readFilters();
+    updateFilterBadge();
     loadProspects();
   });
 });
@@ -371,8 +384,16 @@ document.getElementById('clearFilters').addEventListener('click', () => {
   document.getElementById('filterCountry').value = '';
   document.getElementById('filterCity').value = '';
   activeFilters = {};
+  updateFilterBadge();
   loadProspects();
 });
+
+function updateFilterBadge() {
+  const count = Object.values(activeFilters).filter(Boolean).length;
+  const badge = document.getElementById('filterBadge');
+  badge.textContent = String(count);
+  badge.classList.toggle('hidden', count === 0);
+}
 
 // ============================================
 // LOAD DATA
@@ -385,17 +406,36 @@ async function loadProspects() {
 
 async function loadReminders() {
   const due = await api('/api/reminders');
-  const bar = document.getElementById('reminderBar');
-  const text = document.getElementById('reminderText');
-  if (due.length > 0) {
-    const names = due.slice(0, 3).map(p => p.name).join(', ');
-    const extra = due.length > 3 ? ` et ${due.length - 3} autre(s)` : '';
-    text.textContent = `🔔 A relancer aujourd'hui : ${names}${extra}`;
-    bar.classList.remove('hidden');
-  } else {
-    bar.classList.add('hidden');
+  const badge = document.getElementById('notifBadge');
+  const list = document.getElementById('notifList');
+
+  badge.textContent = String(due.length);
+  badge.classList.toggle('hidden', due.length === 0);
+
+  if (due.length === 0) {
+    list.innerHTML = `<div class="notif-empty">Aucune relance en attente</div>`;
+    return;
   }
+  list.innerHTML = due.map(p => {
+    const wa = waLinkFromPhone(p.phone) || waLinkFromPhone(p.alt_phone);
+    return `
+      <button class="notif-item" data-wa="${wa || ''}" data-id="${p.id}">
+        <span class="notif-item-main">
+          <span class="notif-item-name">${p.name}</span>
+          <span class="notif-item-phone">${p.phone || ''}</span>
+        </span>
+        <span class="notif-item-time">${formatDateTime(p.next_followup_at)}</span>
+      </button>
+    `;
+  }).join('');
 }
+
+document.getElementById('notifList').addEventListener('click', (e) => {
+  const item = e.target.closest('.notif-item');
+  if (!item) return;
+  const wa = item.dataset.wa;
+  if (wa) window.open(wa, '_blank', 'noopener');
+});
 
 async function loadStats() {
   const bench = await api('/api/stats/benchmark');
@@ -747,12 +787,6 @@ importConfirmBtn.addEventListener('click', async () => {
   }
 });
 
-// ============================================
-// REMINDER DISMISS
-// ============================================
-document.getElementById('reminderDismiss').addEventListener('click', () => {
-  document.getElementById('reminderBar').classList.add('hidden');
-});
 
 // ============================================
 // DETAIL MODAL
@@ -778,7 +812,7 @@ async function openDetail(id) {
     waBtn.classList.add('hidden');
   }
 
-  // stage buttons
+  // stage buttons (desktop) + equivalent dropdown (mobile — see .stage-select-mobile in style.css)
   const stageActions = document.getElementById('stageActions');
   stageActions.innerHTML = STAGES.map(s => `
     <button class="stage-btn ${s.key === p.stage ? 'current' : ''}" data-stage="${s.key}">${s.label}</button>
@@ -791,6 +825,16 @@ async function openDetail(id) {
       await refreshAll();
     });
   });
+
+  const stageSelectMobile = document.getElementById('stageSelectMobile');
+  stageSelectMobile.innerHTML = STAGES.map(s => `<option value="${s.key}">${s.label}</option>`).join('');
+  stageSelectMobile.value = p.stage;
+  stageSelectMobile.onchange = async () => {
+    if (stageSelectMobile.value === p.stage) return;
+    await api(`/api/prospects/${id}/stage`, { method: 'POST', body: JSON.stringify({ to_stage: stageSelectMobile.value }) });
+    await openDetail(id);
+    await refreshAll();
+  };
 
   // phone + address fields (editable)
   const { dial, local } = splitE164(p.phone);

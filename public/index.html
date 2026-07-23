@@ -68,7 +68,37 @@
   </nav>
   <div class="topbar-right">
     <span id="currentUserInfo" class="current-user-info"></span>
-    <button id="addProspectBtn" class="btn-primary">+ Ajouter un contact</button>
+    <div class="menu-wrap" id="filterBar">
+      <button id="filterMenuBtn" class="btn-icon" title="Recherche et filtres" aria-haspopup="true" aria-expanded="false">
+        &#128269;<span id="filterBadge" class="icon-badge hidden">0</span>
+      </button>
+      <div id="filterMenu" class="dropdown-menu filter-panel hidden">
+        <input type="text" id="filterSearch" placeholder="Rechercher un nom ou numero...">
+        <select id="filterSource">
+          <option value="">Toutes les sources</option>
+        </select>
+        <select id="filterInterest">
+          <option value="">Tous les interets</option>
+          <option value="produit">Produit</option>
+          <option value="opportunite">Opportunite</option>
+          <option value="indecis">Indecis</option>
+        </select>
+        <select id="filterCountry">
+          <option value="">Tous les pays</option>
+        </select>
+        <input type="text" id="filterCity" placeholder="Ville...">
+        <button id="clearFilters" class="btn-ghost full">Effacer les filtres</button>
+      </div>
+    </div>
+    <div class="menu-wrap">
+      <button id="notifBtn" class="btn-icon" title="Relances a faire" aria-haspopup="true" aria-expanded="false">
+        &#128276;<span id="notifBadge" class="icon-badge hidden">0</span>
+      </button>
+      <div id="notifMenu" class="dropdown-menu notif-panel hidden">
+        <div id="notifList" class="notif-list"></div>
+      </div>
+    </div>
+    <button id="addProspectBtn" class="btn-primary" title="Ajouter un contact" aria-label="Ajouter un contact">+ <span class="btn-label">Ajouter un contact</span></button>
     <div class="menu-wrap">
       <button id="moreMenuBtn" class="btn-icon" title="Plus d'options" aria-haspopup="true" aria-expanded="false">&#8942;</button>
       <div id="moreMenu" class="dropdown-menu hidden">
@@ -78,30 +108,6 @@
     </div>
   </div>
 </header>
-
-<div id="reminderBar" class="reminder-bar hidden">
-  <span id="reminderText"></span>
-  <button id="reminderDismiss" class="reminder-dismiss">&times;</button>
-</div>
-
-<!-- ============ FILTER BAR ============ -->
-<div id="filterBar" class="filter-bar">
-  <input type="text" id="filterSearch" placeholder="Rechercher un nom ou numero...">
-  <select id="filterSource">
-    <option value="">Toutes les sources</option>
-  </select>
-  <select id="filterInterest">
-    <option value="">Tous les interets</option>
-    <option value="produit">Produit</option>
-    <option value="opportunite">Opportunite</option>
-    <option value="indecis">Indecis</option>
-  </select>
-  <select id="filterCountry">
-    <option value="">Tous les pays</option>
-  </select>
-  <input type="text" id="filterCity" placeholder="Ville...">
-  <button id="clearFilters" class="btn-ghost">Effacer</button>
-</div>
 
 <main>
   <!-- BOARD VIEW -->
@@ -272,7 +278,7 @@
         <p class="detail-sub" id="detailSub">—</p>
       </div>
       <div class="modal-header-actions">
-        <a id="detailWaBtn" class="btn-whatsapp hidden" href="#" target="_blank" rel="noopener">💬 Contacter sur WhatsApp</a>
+        <a id="detailWaBtn" class="btn-whatsapp hidden" href="#" target="_blank" rel="noopener" title="Contacter sur WhatsApp">💬 <span class="btn-label">Contacter sur WhatsApp</span></a>
         <button class="modal-close" data-close>&times;</button>
       </div>
     </div>
@@ -280,6 +286,7 @@
     <div class="detail-body">
       <div class="detail-main">
         <div class="stage-actions" id="stageActions"></div>
+        <select id="stageSelectMobile" class="stage-select-mobile"></select>
 
         <h3>Coordonnees</h3>
         <div class="field-row">

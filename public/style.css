@@ -192,6 +192,7 @@ button, input, select, textarea { font-family: inherit; }
   cursor: pointer;
 }
 .btn-ghost:hover { border-color: var(--red); }
+.btn-ghost.full { width: 100%; }
 
 .btn-danger {
   background: transparent;
@@ -233,6 +234,22 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   padding: 0;
 }
 .btn-icon:hover { border-color: var(--red); }
+.btn-icon { position: relative; }
+
+.icon-badge {
+  position: absolute;
+  top: -5px; right: -5px;
+  background: var(--red);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  min-width: 16px; height: 16px;
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  padding: 0 3px;
+}
+.icon-badge.hidden { display: none; }
 
 .menu-wrap { position: relative; }
 .dropdown-menu {
@@ -264,6 +281,51 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 }
 .dropdown-item:hover { background: var(--surface); }
 .dropdown-item-danger { color: #ff8080; }
+
+.filter-panel {
+  padding: 10px;
+  gap: 8px;
+  min-width: 240px;
+}
+.filter-panel input, .filter-panel select {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  width: 100%;
+}
+
+.notif-panel { min-width: 260px; max-width: 320px; padding: 6px; }
+.notif-list { display: flex; flex-direction: column; gap: 2px; max-height: 320px; overflow-y: auto; }
+.notif-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  text-align: left;
+  padding: 9px 10px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.notif-item:hover { background: var(--surface); }
+.notif-item-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.notif-item-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.notif-item-phone { color: var(--text-faint); font-size: 11px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.notif-item-time { flex: 0 0 auto; color: var(--text-faint); font-size: 11px; font-weight: 500; white-space: nowrap; }
+.notif-empty { color: var(--text-faint); font-size: 12.5px; padding: 10px; text-align: center; }
 .current-user-info {
   font-size: 12px;
   color: var(--text-muted);
@@ -273,30 +335,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   white-space: nowrap;
 }
 
-/* ---------- FILTER BAR ---------- */
-.filter-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 12px 28px;
-  border-bottom: 1px solid var(--border);
-  background: #0d0d0d;
-}
-.filter-bar input, .filter-bar select {
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  color: var(--text);
-  padding: 8px 10px;
-  border-radius: 6px;
-  font-size: 12.5px;
-}
-.filter-bar input#filterSearch { flex: 1; min-width: 180px; }
-.filter-bar input#filterCity { width: 130px; }
-
 /* ---------- PHONE ROW ---------- */
-.phone-row { display: flex; gap: 6px; }
+.phone-row { display: flex; gap: 6px; min-width: 0; }
 .phone-row select { flex: 0 0 110px; }
-.phone-row input { flex: 1; }
+.phone-row input { flex: 1; min-width: 0; }
 
 .field-group-title {
   font-size: 11px;
@@ -308,8 +350,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   padding-top: 12px;
 }
 
-.two-col { display: flex; gap: 10px; }
-.two-col label { flex: 1; }
+.two-col { display: flex; gap: 10px; min-width: 0; }
+.two-col label { flex: 1; min-width: 0; }
 
 /* ---------- WHATSAPP BUTTON ---------- */
 .btn-whatsapp {
@@ -330,23 +372,6 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   margin: -6px 0 14px;
 }
 
-/* ---------- REMINDER BAR ---------- */
-.reminder-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: #2a1010;
-  border-bottom: 1px solid var(--red-deep);
-  color: #ffd0d0;
-  padding: 10px 28px;
-  font-size: 13px;
-  font-weight: 600;
-}
-.reminder-bar.hidden { display: none; }
-.reminder-dismiss {
-  background: transparent; border: none; color: #ffd0d0;
-  font-size: 18px; cursor: pointer; line-height: 1;
-}
 
 /* ---------- MAIN / VIEWS ---------- */
 main { padding: 24px 28px 60px; }
@@ -619,7 +644,8 @@ tbody tr:not(:last-child) td { border-bottom: 1px solid var(--border); }
 .modal-wide { max-width: 760px; }
 
 .modal-header {
-  display: flex; justify-content: space-between; align-items: flex-start;
+  display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start;
+  gap: 8px;
   margin-bottom: 16px;
 }
 .modal-header h2 { font-family: var(--font-display); font-size: 18px; margin: 0; }
@@ -651,6 +677,8 @@ input, select, textarea {
   padding: 9px 11px;
   border-radius: 6px;
   font-size: 13px;
+  width: 100%;
+  min-width: 0;
 }
 textarea { resize: vertical; min-height: 64px; }
 
@@ -662,6 +690,7 @@ textarea { resize: vertical; min-height: 64px; }
 .detail-main h3:first-of-type { margin-top: 0; }
 
 .stage-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+.stage-select-mobile { display: none; margin-bottom: 14px; font-weight: 700; }
 .stage-btn {
   background: var(--surface-2);
   border: 1px solid var(--border);
@@ -681,8 +710,8 @@ textarea { resize: vertical; min-height: 64px; }
   color: #fff;
 }
 
-.field-row { display: flex; align-items: flex-end; gap: 8px; margin-bottom: 6px; }
-.field-row label { flex: 1; }
+.field-row { display: flex; align-items: flex-end; gap: 8px; margin-bottom: 6px; min-width: 0; }
+.field-row label { flex: 1; min-width: 0; }
 
 .interactions-list { display: flex; flex-direction: column; gap: 8px; max-height: 220px; overflow-y: auto; }
 .interaction-item {
@@ -726,15 +755,54 @@ textarea { resize: vertical; min-height: 64px; }
   .board { grid-template-columns: 1fr; }
   .detail-body { grid-template-columns: 1fr; }
   .tabs { order: 3; width: 100%; justify-content: flex-start; }
+
+  /* The stage row (Contact / Contacte / Prospect / ...) wraps across several
+     lines and eats the top of the edit modal on narrow screens — a dropdown
+     says the same thing in one line. */
+  .stage-actions { display: none; }
+  .stage-select-mobile { display: block; }
 }
 
 @media (max-width: 480px) {
   html, body { max-width: 100vw; overflow-x: hidden; }
   .topbar { padding: 12px 14px; gap: 10px; }
   .brand-sub { display: none; }
-  .topbar-right { width: 100%; justify-content: space-between; }
-  .current-user-info { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  .filter-bar, main, .reminder-bar { padding-left: 14px; padding-right: 14px; }
+  .topbar-right { width: 100%; justify-content: flex-end; }
+  .current-user-info {
+    order: -1;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-right: auto;
+  }
+  #addProspectBtn { padding: 9px 10px; }
+  #addProspectBtn .btn-label { display: none; }
+  main { padding-left: 14px; padding-right: 14px; }
   .tabs { gap: 2px; }
   .tab-btn { padding: 8px 10px; font-size: 12px; }
+
+  /* Dropdowns are anchored to their (small) trigger button by default, which
+     overflows off the left edge on narrow screens since the trigger sits
+     mid-row, not at the screen edge. Anchor to the viewport instead. */
+  .dropdown-menu {
+    position: fixed;
+    top: 64px;
+    right: 10px;
+    left: 10px;
+    width: auto;
+    min-width: 0;
+    max-width: none;
+  }
+
+  /* Modal content rows: these use side-by-side flex layout on desktop
+     (e.g. country + city, phone dial-code + number), which forces the
+     whole modal wider than the screen if it can't wrap on mobile. */
+  .modal-overlay { padding: 10px; }
+  .modal { padding: 18px 16px 22px; }
+  .two-col { flex-wrap: wrap; }
+  .field-row { flex-wrap: wrap; }
+  .phone-row select { flex: 0 0 90px; }
+  .btn-whatsapp .btn-label { display: none; }
+  .btn-whatsapp { padding: 9px 10px; }
 }
