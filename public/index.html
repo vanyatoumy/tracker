@@ -68,9 +68,14 @@
   </nav>
   <div class="topbar-right">
     <span id="currentUserInfo" class="current-user-info"></span>
-    <button id="importBtn" class="btn-ghost">Importer des contacts</button>
     <button id="addProspectBtn" class="btn-primary">+ Ajouter un contact</button>
-    <button id="logoutBtn" class="btn-ghost" title="Deconnexion">⏻</button>
+    <div class="menu-wrap">
+      <button id="moreMenuBtn" class="btn-icon" title="Plus d'options" aria-haspopup="true" aria-expanded="false">&#8942;</button>
+      <div id="moreMenu" class="dropdown-menu hidden">
+        <button id="importBtn" class="dropdown-item">Importer des contacts</button>
+        <button id="logoutBtn" class="dropdown-item dropdown-item-danger">Deconnexion</button>
+      </div>
+    </div>
   </div>
 </header>
 

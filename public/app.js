@@ -203,6 +203,24 @@ document.getElementById('logoutBtn').addEventListener('click', async () => {
   showAuthScreen();
 });
 
+const moreMenuBtn = document.getElementById('moreMenuBtn');
+const moreMenu = document.getElementById('moreMenu');
+moreMenuBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const willOpen = moreMenu.classList.contains('hidden');
+  moreMenu.classList.toggle('hidden', !willOpen);
+  moreMenuBtn.setAttribute('aria-expanded', String(willOpen));
+});
+document.addEventListener('click', (e) => {
+  if (!moreMenu.classList.contains('hidden') && !moreMenu.contains(e.target) && e.target !== moreMenuBtn) {
+    moreMenu.classList.add('hidden');
+    moreMenuBtn.setAttribute('aria-expanded', 'false');
+  }
+});
+moreMenu.addEventListener('click', (e) => {
+  if (e.target.tagName === 'BUTTON') moreMenu.classList.add('hidden');
+});
+
 async function bootApp() {
   showApp();
   document.getElementById('currentUserInfo').textContent = currentUser ? `${currentUser.name} · ${currentUser.phone}` : '';

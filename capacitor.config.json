@@ -1,0 +1,9 @@
+{
+  "appId": "com.suiviprospection.app",
+  "appName": "Suivi Prospection",
+  "webDir": "public",
+  "server": {
+    "url": "http://54.38.242.120:3000",
+    "cleartext": true
+  }
+}

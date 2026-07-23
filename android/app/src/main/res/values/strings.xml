@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Suivi Prospection</string>
+    <string name="title_activity_main">Suivi Prospection</string>
+    <string name="package_name">com.suiviprospection.app</string>
+    <string name="custom_url_scheme">com.suiviprospection.app</string>
+</resources>
