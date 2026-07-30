@@ -62,6 +62,26 @@ app.use((req, res, next) => {
 });
 app.use((req, res, next) => { if (!req.body || typeof req.body !== 'object') req.body = {}; next(); });
 app.use(cookieParser());
+
+// The mobile app is bundled locally (not served from this origin), so its
+// requests are cross-origin — Capacitor's local-content origin on Android,
+// set to plain http (not the https default) in capacitor.config.json's
+// androidScheme, so it doesn't trip mixed-content blocking when calling
+// this plain-HTTP API (there's no TLS anywhere in this setup yet). It
+// authenticates via a Bearer token instead of the session cookie (see
+// getTokenFromRequest/setSessionCookie below), so this doesn't need
+// Access-Control-Allow-Credentials — no cookies cross that boundary.
+const NATIVE_APP_ORIGIN = 'http://localhost';
+app.use((req, res, next) => {
+    if (req.headers.origin === NATIVE_APP_ORIGIN) {
+        res.setHeader('Access-Control-Allow-Origin', NATIVE_APP_ORIGIN);
+        res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        if (req.method === 'OPTIONS') return res.sendStatus(204);
+    }
+    next();
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Brute-force / signup-spam protection on the auth endpoints only — the rest
@@ -95,8 +115,17 @@ function setSessionCookie(res, token, expiresAt) {
 }
 
 // ---------- AUTH MIDDLEWARE ----------
+// The mobile app can't use the session cookie cross-origin (see the CORS
+// comment above), so it sends the same session token as a Bearer header
+// instead. Web keeps using the cookie unchanged. Either is accepted here —
+// same session store, just two ways to present the same token.
+function getTokenFromRequest(req) {
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) return authHeader.slice(7);
+    return req.cookies[COOKIE_NAME];
+}
 function requireAuth(req, res, next) {
-    const token = req.cookies[COOKIE_NAME];
+    const token = getTokenFromRequest(req);
     if (!token) return res.status(401).json({ error: 'Non authentifie' });
     const session = db.getSession(token);
     if (!session) return res.status(401).json({ error: 'Session expiree, reconnecte-toi' });
@@ -168,19 +197,26 @@ app.post('/api/auth/login', authLimiter, (req, res) => {
         db.clearFailedLogins(user.id);
         const { token, expires_at } = db.createSession(user.id);
         setSessionCookie(res, token, expires_at);
-        res.json({ id: user.id, name: user.name, phone: user.phone, is_admin: !!user.is_admin });
+        const body = { id: user.id, name: user.name, phone: user.phone, is_admin: !!user.is_admin };
+        // Only the native app needs the raw token (it can't use the cookie
+        // cross-origin — see the CORS comment above). Putting it in the JSON
+        // body for every client, including the web version, would defeat
+        // the httpOnly cookie's whole point there: an XSS on the web page
+        // could then just read the token straight out of the response.
+        if (req.headers.origin === NATIVE_APP_ORIGIN) body.token = token;
+        res.json(body);
     } catch (err) { handleError(res, err); }
 });
 
 app.post('/api/auth/logout', (req, res) => {
-    const token = req.cookies[COOKIE_NAME];
+    const token = getTokenFromRequest(req);
     if (token) db.deleteSession(token);
     res.clearCookie(COOKIE_NAME);
     res.status(204).end();
 });
 
 app.get('/api/auth/me', (req, res) => {
-    const token = req.cookies[COOKIE_NAME];
+    const token = getTokenFromRequest(req);
     if (!token) return res.status(401).json({ error: 'Non authentifie' });
     const session = db.getSession(token);
     if (!session) return res.status(401).json({ error: 'Session expiree' });

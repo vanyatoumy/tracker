@@ -92,6 +92,11 @@ button, input, select, textarea { font-family: inherit; }
   color: var(--text);
 }
 
+[data-requires-online]:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .auth-form { display: flex; flex-direction: column; gap: 14px; text-align: left; }
 .auth-error {
   color: var(--red);
@@ -335,10 +340,37 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   white-space: nowrap;
 }
 
+.offline-status {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 5px 9px;
+  border-radius: 6px;
+  white-space: nowrap;
+  background: #2a1010;
+  color: #ffab8f;
+  border: 1px solid var(--red-deep);
+}
+.offline-status.hidden { display: none; }
+
 /* ---------- PHONE ROW ---------- */
 .phone-row { display: flex; gap: 6px; min-width: 0; }
 .phone-row select { flex: 0 0 110px; }
 .phone-row input { flex: 1; min-width: 0; }
+
+.password-row { display: flex; gap: 6px; }
+.password-row input { flex: 1; min-width: 0; }
+.password-toggle {
+  flex: 0 0 auto;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 6px;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 11px;
+}
+.password-toggle:hover { color: var(--text); border-color: var(--red); }
 
 .field-group-title {
   font-size: 11px;

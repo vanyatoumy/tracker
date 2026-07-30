@@ -39,6 +39,13 @@ function setCollapsedStages(set) {
 // API HELPER
 // ============================================
 async function api(path, opts = {}) {
+  // OfflineSync (mobile app only — see offline.js) transparently falls back
+  // to a local cache/queue when there's no connectivity. On the web version
+  // OfflineSync.enabled is false and this behaves exactly as a plain fetch.
+  if (typeof OfflineSync !== 'undefined' && OfflineSync.enabled) {
+    return OfflineSync.request(path, opts, showAuthScreen);
+  }
+
   const res = await fetch(path, {
     headers: { 'Content-Type': 'application/json' },
     credentials: 'same-origin',
@@ -159,16 +166,41 @@ document.querySelectorAll('.auth-tab-btn').forEach(btn => {
   });
 });
 
+document.querySelectorAll('.password-toggle').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const input = document.getElementById(btn.dataset.target);
+    const showing = input.type === 'text';
+    input.type = showing ? 'password' : 'text';
+    btn.textContent = showing ? '👁' : '🙈';
+    btn.title = showing ? 'Afficher le mot de passe' : 'Masquer le mot de passe';
+  });
+});
+
 document.getElementById('loginForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const errEl = document.getElementById('loginError');
   errEl.textContent = '';
   const fd = new FormData(e.target);
+  const phone = fd.get('phone');
+  const password = fd.get('password');
   try {
     currentUser = await api('/api/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ phone: fd.get('phone'), password: fd.get('password') })
+      body: JSON.stringify({ phone, password })
     });
+    // Succeeds whether this came from the real server or (offline) from a
+    // previously cached verifier — either way, refresh the local verifier
+    // so it always reflects the last password actually used successfully.
+    if (typeof OfflineSync !== 'undefined' && OfflineSync.enabled) {
+      await OfflineSync.cacheLoginCredential(phone, password, currentUser);
+      // Only a real online login returns a fresh session token — offline
+      // login just re-verifies the cached password locally (see
+      // verifyOfflineLogin in offline.js) and can't obtain a new one. Skip
+      // the call entirely in that case, rather than passing something
+      // falsy, so whatever token is already cached from the last online
+      // login is left untouched instead of being wiped.
+      if (currentUser.token) await OfflineSync.setToken(currentUser.token);
+    }
     await bootApp();
   } catch (err) {
     errEl.textContent = err.message;
@@ -198,7 +230,12 @@ document.getElementById('registerForm').addEventListener('submit', async (e) => 
 });
 
 document.getElementById('logoutBtn').addEventListener('click', async () => {
-  await api('/api/auth/logout', { method: 'POST' });
+  // Signing out must work offline too — clear local state regardless of
+  // whether the server call actually goes through. If it doesn't, the
+  // server-side session just lingers until it naturally expires; the device
+  // itself is still fully signed out.
+  try { await api('/api/auth/logout', { method: 'POST' }); } catch { /* offline — fine, see above */ }
+  if (typeof OfflineSync !== 'undefined' && OfflineSync.enabled) await OfflineSync.clearSession();
   currentUser = null;
   showAuthScreen();
 });
@@ -349,6 +386,45 @@ if (isNativeApp()) {
   });
 }
 
+let offlineStatusInterval = null;
+function startOfflineStatusIndicator() {
+  if (offlineStatusInterval) return;
+  const el = document.getElementById('offlineStatus');
+  const tick = async () => {
+    const pending = await OfflineSync.pendingCount();
+    const offline = !OfflineSync.isOnline;
+    if (!offline && pending === 0) {
+      el.classList.add('hidden');
+      return;
+    }
+    el.classList.remove('hidden');
+    if (offline && pending > 0) el.textContent = `📴 Hors ligne · ${pending} en attente`;
+    else if (offline) el.textContent = '📴 Hors ligne';
+    else el.textContent = `🔄 Synchronisation... ${pending} en attente`;
+  };
+  tick();
+  offlineStatusInterval = setInterval(tick, 3000);
+}
+
+// Buttons/tabs whose entire function needs the real server (account
+// creation, bulk import, admin user management) are disabled while offline
+// rather than left clickable to fail with an error after the fact. Runs
+// from script load — the register tab lives on the auth screen, before any
+// login — not just after bootApp().
+function updateOfflineGatedUI() {
+  const offline = !OfflineSync.isOnline;
+  document.querySelectorAll('[data-requires-online]').forEach(el => {
+    el.disabled = offline;
+    el.title = offline ? 'Necessite une connexion internet' : '';
+  });
+}
+if (typeof OfflineSync !== 'undefined' && OfflineSync.enabled) {
+  updateOfflineGatedUI();
+  window.addEventListener('online', updateOfflineGatedUI);
+  window.addEventListener('offline', updateOfflineGatedUI);
+  setInterval(updateOfflineGatedUI, 3000);
+}
+
 async function bootApp() {
   showApp();
   document.getElementById('currentUserInfo').textContent = currentUser ? `${currentUser.name} · ${currentUser.phone}` : '';
@@ -357,6 +433,10 @@ async function bootApp() {
   populateCountrySelects();
   populateFilterOptions();
   await requestNotificationPermission();
+  if (typeof OfflineSync !== 'undefined' && OfflineSync.enabled) {
+    await OfflineSync.setUser(currentUser);
+    startOfflineStatusIndicator();
+  }
   await refreshAll();
 
   if (pendingNotificationProspectId) {
