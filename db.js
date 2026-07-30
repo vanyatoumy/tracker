@@ -209,7 +209,7 @@ function resetPasswordByPhone(phone, newPassword) {
     if (!user) throw new NotFoundError(`Aucun compte trouve pour le numero ${phone}`);
 
     const { salt, hash } = hashPassword(newPassword);
-    db.prepare(`UPDATE users SET password_hash = ?, password_salt = ? WHERE id = ?`)
+    db.prepare(`UPDATE users SET password_hash = ?, password_salt = ?, failed_login_attempts = 0, locked_until = NULL WHERE id = ?`)
         .run(hash, salt, user.id);
     db.prepare(`DELETE FROM sessions WHERE user_id = ?`).run(user.id);
 

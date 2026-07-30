@@ -452,6 +452,7 @@ main { padding: 24px 28px 60px; }
   min-height: 60px;
   max-height: calc(100vh - 280px);
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .column.collapsed .column-body,
@@ -491,6 +492,8 @@ main { padding: 24px 28px 60px; }
   font-weight: 700;
   font-size: 13.5px;
   margin: 0;
+  overflow-wrap: break-word;
+  min-width: 0;
 }
 
 .card-wa {
