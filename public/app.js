@@ -304,6 +304,35 @@ async function cancelFollowupNotification(prospectId) {
   }
 }
 
+// ============================================
+// PHONE CONTACTS (create-on-add only)
+// ============================================
+// Only for the manual "Ajouter un contact" flow — never for bulk/Google
+// import, since those contacts already exist in the phone's address book
+// (that's literally where the import read them from) and writing them back
+// would just create duplicates.
+async function savePhoneContact(prospect) {
+  if (!isNativeApp()) return;
+  const { Contacts } = window.Capacitor.Plugins;
+
+  try {
+    const status = await Contacts.checkPermissions();
+    if (status.contacts !== 'granted') {
+      const requested = await Contacts.requestPermissions();
+      if (requested.contacts !== 'granted') return;
+    }
+
+    const phones = [];
+    if (prospect.phone) phones.push({ type: 'mobile', number: prospect.phone, isPrimary: true });
+    if (prospect.alt_phone) phones.push({ type: 'mobile', number: prospect.alt_phone, isPrimary: false });
+    if (phones.length === 0) return;
+
+    await Contacts.createContact({ contact: { name: { given: prospect.name }, phones } });
+  } catch (err) {
+    console.error('Failed to save phone contact:', err);
+  }
+}
+
 // Tapping a follow-up notification should jump straight to that contact.
 // Registered unconditionally at script load (not inside bootApp) because a
 // cold start — app fully closed, launched by tapping the notification — needs
@@ -745,6 +774,7 @@ document.getElementById('addForm').addEventListener('submit', async (e) => {
   };
   const created = await api('/api/prospects', { method: 'POST', body: JSON.stringify(payload) });
   await syncFollowupNotification(created);
+  await savePhoneContact(created);
   e.target.reset();
   addModal.classList.add('hidden');
   await refreshAll();
