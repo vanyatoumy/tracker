@@ -304,6 +304,22 @@ async function cancelFollowupNotification(prospectId) {
   }
 }
 
+// Tapping a follow-up notification should jump straight to that contact.
+// Registered unconditionally at script load (not inside bootApp) because a
+// cold start — app fully closed, launched by tapping the notification — needs
+// the listener attached before Capacitor replays the launch notification
+// event. If the app isn't logged in/booted yet when that fires, the id is
+// held here and opened once bootApp() finishes instead of being dropped.
+let pendingNotificationProspectId = null;
+if (isNativeApp()) {
+  window.Capacitor.Plugins.LocalNotifications.addListener('localNotificationActionPerformed', (event) => {
+    const prospectId = event?.notification?.extra?.prospectId;
+    if (!prospectId) return;
+    if (currentUser) openDetail(prospectId);
+    else pendingNotificationProspectId = prospectId;
+  });
+}
+
 async function bootApp() {
   showApp();
   document.getElementById('currentUserInfo').textContent = currentUser ? `${currentUser.name} · ${currentUser.phone}` : '';
@@ -313,6 +329,12 @@ async function bootApp() {
   populateFilterOptions();
   await requestNotificationPermission();
   await refreshAll();
+
+  if (pendingNotificationProspectId) {
+    const id = pendingNotificationProspectId;
+    pendingNotificationProspectId = null;
+    await openDetail(id);
+  }
 }
 
 // ============================================
