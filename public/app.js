@@ -233,6 +233,77 @@ setupMenu('moreMenuBtn', 'moreMenu');
 setupMenu('filterMenuBtn', 'filterMenu', { closeOnButtonClick: false });
 setupMenu('notifBtn', 'notifMenu');
 
+// ============================================
+// LOCAL NOTIFICATIONS (follow-up reminders)
+// ============================================
+// Only present inside the Capacitor-wrapped mobile app — plain web browsers
+// leave window.Capacitor undefined, so every function here is a silent no-op
+// there rather than something we need to feature-detect at every call site.
+function isNativeApp() {
+  return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+}
+
+// Local Notifications needs a stable 32-bit integer id per prospect (not the
+// UUID string it actually has) so a reschedule can find and replace the
+// previous notification instead of piling up duplicates. djb2 hash, masked
+// to a positive 31-bit int (the plugin's id range).
+function notifIdForProspect(prospectId) {
+  let hash = 5381;
+  for (let i = 0; i < prospectId.length; i++) {
+    hash = ((hash * 33) ^ prospectId.charCodeAt(i)) >>> 0;
+  }
+  return hash & 0x7fffffff;
+}
+
+async function requestNotificationPermission() {
+  if (!isNativeApp()) return;
+  try {
+    const { LocalNotifications } = window.Capacitor.Plugins;
+    await LocalNotifications.requestPermissions();
+  } catch (err) {
+    console.error('Notification permission request failed:', err);
+  }
+}
+
+// Cancels any previously scheduled reminder for this prospect, then schedules
+// a fresh one if next_followup_at is set, in the future, and the contact
+// isn't archived. Called after every create/update so the notification
+// always matches whatever's currently saved for that contact.
+async function syncFollowupNotification(prospect) {
+  if (!isNativeApp()) return;
+  const { LocalNotifications } = window.Capacitor.Plugins;
+  const id = notifIdForProspect(prospect.id);
+
+  try {
+    await LocalNotifications.cancel({ notifications: [{ id }] });
+
+    const at = prospect.next_followup_at ? new Date(prospect.next_followup_at) : null;
+    if (!at || at <= new Date() || prospect.is_archived) return;
+
+    await LocalNotifications.schedule({
+      notifications: [{
+        id,
+        title: 'Relance a faire',
+        body: prospect.name,
+        schedule: { at },
+        extra: { prospectId: prospect.id }
+      }]
+    });
+  } catch (err) {
+    console.error('Failed to sync follow-up notification:', err);
+  }
+}
+
+async function cancelFollowupNotification(prospectId) {
+  if (!isNativeApp()) return;
+  try {
+    const { LocalNotifications } = window.Capacitor.Plugins;
+    await LocalNotifications.cancel({ notifications: [{ id: notifIdForProspect(prospectId) }] });
+  } catch (err) {
+    console.error('Failed to cancel follow-up notification:', err);
+  }
+}
+
 async function bootApp() {
   showApp();
   document.getElementById('currentUserInfo').textContent = currentUser ? `${currentUser.name} · ${currentUser.phone}` : '';
@@ -240,6 +311,7 @@ async function bootApp() {
   populateDialSelects();
   populateCountrySelects();
   populateFilterOptions();
+  await requestNotificationPermission();
   await refreshAll();
 }
 
@@ -650,6 +722,7 @@ document.getElementById('addForm').addEventListener('submit', async (e) => {
     next_followup_at: fd.get('next_followup_at') ? new Date(fd.get('next_followup_at')).toISOString() : null
   };
   const created = await api('/api/prospects', { method: 'POST', body: JSON.stringify(payload) });
+  await syncFollowupNotification(created);
   e.target.reset();
   addModal.classList.add('hidden');
   await refreshAll();
@@ -903,7 +976,7 @@ document.getElementById('saveDetails').addEventListener('click', async () => {
   if (!name) { alert('Le nom ne peut pas etre vide.'); return; }
 
   try {
-    await api(`/api/prospects/${activeProspectId}`, {
+    const updated = await api(`/api/prospects/${activeProspectId}`, {
       method: 'PATCH',
       body: JSON.stringify({
         name,
@@ -918,6 +991,7 @@ document.getElementById('saveDetails').addEventListener('click', async () => {
         next_followup_at: followup ? new Date(followup).toISOString() : null
       })
     });
+    await syncFollowupNotification(updated);
     await openDetail(activeProspectId);
     await refreshAll();
   } catch (err) {
@@ -965,6 +1039,7 @@ async function loadHistory(id) {
 document.getElementById('archiveBtn').addEventListener('click', async () => {
   if (!confirm('Marquer ce contact comme perdu ? Il sera retire du pipeline actif.')) return;
   await api(`/api/prospects/${activeProspectId}/archive`, { method: 'POST', body: JSON.stringify({ archived: true }) });
+  await cancelFollowupNotification(activeProspectId);
   detailModal.classList.add('hidden');
   await refreshAll();
 });
@@ -972,6 +1047,7 @@ document.getElementById('archiveBtn').addEventListener('click', async () => {
 document.getElementById('deleteBtn').addEventListener('click', async () => {
   if (!confirm("Supprimer definitivement ce contact ? Cette action est irreversible — tout l'historique et les interactions seront perdus. Si tu veux juste le retirer du pipeline sans perdre l'historique, utilise plutot \"Marquer comme perdu\".")) return;
   await api(`/api/prospects/${activeProspectId}`, { method: 'DELETE' });
+  await cancelFollowupNotification(activeProspectId);
   detailModal.classList.add('hidden');
   await refreshAll();
 });
