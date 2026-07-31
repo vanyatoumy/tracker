@@ -29,7 +29,7 @@
       <label>Mot de passe
         <div class="password-row">
           <input type="password" name="password" required id="loginPassword">
-          <button type="button" class="password-toggle" data-target="loginPassword" title="Afficher le mot de passe">&#128065;</button>
+          <button type="button" class="password-toggle" data-target="loginPassword" title="Afficher le mot de passe"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></svg></span></button>
         </div>
       </label>
       <p class="auth-error" id="loginError"></p>
@@ -46,7 +46,7 @@
       <label>Mot de passe
         <div class="password-row">
           <input type="password" name="password" required minlength="6" placeholder="6 caracteres minimum" id="registerPassword">
-          <button type="button" class="password-toggle" data-target="registerPassword" title="Afficher le mot de passe">&#128065;</button>
+          <button type="button" class="password-toggle" data-target="registerPassword" title="Afficher le mot de passe"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></svg></span></button>
         </div>
       </label>
       <p class="auth-error" id="registerError"></p>
@@ -77,7 +77,7 @@
     <span id="offlineStatus" class="offline-status hidden"></span>
     <div class="menu-wrap" id="filterBar">
       <button id="filterMenuBtn" class="btn-icon" title="Recherche et filtres" aria-haspopup="true" aria-expanded="false">
-        &#128269;<span id="filterBadge" class="icon-badge hidden">0</span>
+        <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg></span><span id="filterBadge" class="icon-badge hidden">0</span>
       </button>
       <div id="filterMenu" class="dropdown-menu filter-panel hidden">
         <input type="text" id="filterSearch" placeholder="Rechercher un nom ou numero...">
@@ -99,7 +99,7 @@
     </div>
     <div class="menu-wrap">
       <button id="notifBtn" class="btn-icon" title="Relances a faire" aria-haspopup="true" aria-expanded="false">
-        &#128276;<span id="notifBadge" class="icon-badge hidden">0</span>
+        <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></svg></span><span id="notifBadge" class="icon-badge hidden">0</span>
       </button>
       <div id="notifMenu" class="dropdown-menu notif-panel hidden">
         <div id="notifList" class="notif-list"></div>
@@ -107,7 +107,7 @@
     </div>
     <button id="addProspectBtn" class="btn-primary" title="Ajouter un contact" aria-label="Ajouter un contact">+ <span class="btn-label">Ajouter un contact</span></button>
     <div class="menu-wrap">
-      <button id="moreMenuBtn" class="btn-icon" title="Plus d'options" aria-haspopup="true" aria-expanded="false">&#8942;</button>
+      <button id="moreMenuBtn" class="btn-icon" title="Plus d'options" aria-haspopup="true" aria-expanded="false"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg></span></button>
       <div id="moreMenu" class="dropdown-menu hidden">
         <button id="importBtn" class="dropdown-item" data-requires-online>Importer des contacts</button>
         <button id="logoutBtn" class="dropdown-item dropdown-item-danger">Deconnexion</button>
@@ -193,7 +193,7 @@
   <div class="modal">
     <div class="modal-header">
       <h2>Ajouter un contact</h2>
-      <button class="modal-close" data-close>&times;</button>
+      <button class="modal-close" data-close><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></span></button>
     </div>
     <form id="addForm">
       <label>Nom
@@ -257,7 +257,7 @@
   <div class="modal">
     <div class="modal-header">
       <h2>Importer des contacts</h2>
-      <button class="modal-close" data-close>&times;</button>
+      <button class="modal-close" data-close><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></span></button>
     </div>
     <div class="import-body">
       <p class="import-hint">
@@ -285,8 +285,8 @@
         <p class="detail-sub" id="detailSub">—</p>
       </div>
       <div class="modal-header-actions">
-        <a id="detailWaBtn" class="btn-whatsapp hidden" href="#" target="_blank" rel="noopener" title="Contacter sur WhatsApp">💬 <span class="btn-label">Contacter sur WhatsApp</span></a>
-        <button class="modal-close" data-close>&times;</button>
+        <a id="detailWaBtn" class="btn-whatsapp hidden" href="#" target="_blank" rel="noopener" title="Contacter sur WhatsApp"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"/></svg></span> <span class="btn-label">Contacter sur WhatsApp</span></a>
+        <button class="modal-close" data-close><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></span></button>
       </div>
     </div>
 
@@ -316,7 +316,7 @@
               <input type="tel" id="detailAltPhoneLocal" placeholder="677123456">
             </div>
           </label>
-          <a id="detailAltWaBtn" class="card-wa hidden" href="#" target="_blank" rel="noopener" title="Ouvrir WhatsApp">&#x1F4AC;</a>
+          <a id="detailAltWaBtn" class="card-wa hidden" href="#" target="_blank" rel="noopener" title="Ouvrir WhatsApp"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"/></svg></span></a>
         </div>
         <div class="two-col">
           <label>Pays

@@ -27,6 +27,37 @@ let activeProspectId = null;
 let currentUser = null;
 let activeFilters = {};
 
+// ============================================
+// ICONS (inlined Lucide SVGs — https://lucide.dev, ISC license)
+// ============================================
+// Inlined rather than loaded from a CDN font/library: the app needs to keep
+// working fully offline, and the existing CSP only allows 'self' plus
+// Google Fonts — no external icon service fits either constraint. Each is
+// the exact source markup from the lucide-static package, just wrapped in
+// a size-controlling <span class="icon">.
+const ICONS = {
+  search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>',
+  bell: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></svg>',
+  eye: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></svg>',
+  eyeOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/></svg>',
+  x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>',
+  chevronDown: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>',
+  chevronRight: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>',
+  moreVertical: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>',
+  wifiOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h.01"/><path d="M8.5 16.429a5 5 0 0 1 7 0"/><path d="M5 12.859a10 10 0 0 1 5.17-2.69"/><path d="M19 12.859a10 10 0 0 0-2.007-1.523"/><path d="M2 8.82a15 15 0 0 1 4.177-2.643"/><path d="M22 8.82a15 15 0 0 0-11.288-3.764"/><path d="m2 2 20 20"/></svg>',
+  refreshCw: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>',
+  arrowDown: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg>',
+  alarmClock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2"/><path d="M5 3 2 6"/><path d="m22 6-3-3"/><path d="M6.38 18.7 4 21"/><path d="M17.64 18.67 20 21"/></svg>',
+  calendar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v3"/><path d="M16 2v3"/><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/></svg>',
+  mapPin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/></svg>',
+  crown: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11.562 3.266a.5.5 0 0 1 .876 0L15.39 8.87a1 1 0 0 0 1.516.294L21.183 5.5a.5.5 0 0 1 .798.519l-2.834 10.246a1 1 0 0 1-.956.734H5.81a1 1 0 0 1-.957-.734L2.02 6.02a.5.5 0 0 1 .798-.519l4.276 3.664a1 1 0 0 0 1.516-.294z"/><path d="M5 21h14"/></svg>',
+  messageCircle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"/></svg>',
+  globe: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>'
+};
+function icon(name, extraClass) {
+  return `<span class="icon${extraClass ? ' ' + extraClass : ''}">${ICONS[name]}</span>`;
+}
+
 function getCollapsedStages() {
   try { return new Set(JSON.parse(localStorage.getItem('collapsedStages') || '[]')); }
   catch { return new Set(); }
@@ -171,7 +202,7 @@ document.querySelectorAll('.password-toggle').forEach(btn => {
     const input = document.getElementById(btn.dataset.target);
     const showing = input.type === 'text';
     input.type = showing ? 'password' : 'text';
-    btn.textContent = showing ? '👁' : '🙈';
+    btn.innerHTML = showing ? icon('eye') : icon('eyeOff');
     btn.title = showing ? 'Afficher le mot de passe' : 'Masquer le mot de passe';
   });
 });
@@ -188,6 +219,9 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
       method: 'POST',
       body: JSON.stringify({ phone, password })
     });
+    // Remembered so the phone number is prefilled next time — deliberately
+    // never the password, see the prefill code near the bottom of this file.
+    localStorage.setItem('lastLoginPhone', phone);
     // Succeeds whether this came from the real server or (offline) from a
     // previously cached verifier — either way, refresh the local verifier
     // so it always reflects the last password actually used successfully.
@@ -398,13 +432,46 @@ function startOfflineStatusIndicator() {
       return;
     }
     el.classList.remove('hidden');
-    if (offline && pending > 0) el.textContent = `📴 Hors ligne · ${pending} en attente`;
-    else if (offline) el.textContent = '📴 Hors ligne';
-    else el.textContent = `🔄 Synchronisation... ${pending} en attente`;
+    if (offline && pending > 0) el.innerHTML = `${icon('wifiOff')} Hors ligne · ${pending} en attente`;
+    else if (offline) el.innerHTML = `${icon('wifiOff')} Hors ligne`;
+    else el.innerHTML = `${icon('refreshCw')} Synchronisation... ${pending} en attente`;
   };
   tick();
   offlineStatusInterval = setInterval(tick, 3000);
 }
+
+// Pull-to-refresh: plain touch events rather than a plugin, since it needs
+// no native capability — only fires with an actual touchscreen, so it's a
+// no-op on a desktop mouse without any extra guard.
+(function setupPullToRefresh() {
+  const THRESHOLD = 70;
+  const indicator = document.createElement('div');
+  indicator.className = 'pull-refresh-indicator hidden';
+  document.body.prepend(indicator);
+
+  let startY = null;
+
+  document.addEventListener('touchstart', (e) => {
+    startY = (document.scrollingElement?.scrollTop || 0) === 0 ? e.touches[0].clientY : null;
+  }, { passive: true });
+
+  document.addEventListener('touchmove', (e) => {
+    if (startY === null) return;
+    const dy = e.touches[0].clientY - startY;
+    if (dy < 10) { indicator.classList.add('hidden'); return; }
+    indicator.innerHTML = dy > THRESHOLD ? `${icon('refreshCw')} Relache pour actualiser` : `${icon('arrowDown')} Tire pour actualiser`;
+    indicator.classList.remove('hidden');
+  }, { passive: true });
+
+  document.addEventListener('touchend', (e) => {
+    if (startY === null) return;
+    const dy = (e.changedTouches[0]?.clientY ?? startY) - startY;
+    startY = null;
+    if (dy <= THRESHOLD) { indicator.classList.add('hidden'); return; }
+    indicator.innerHTML = `${icon('refreshCw')} Actualisation...`;
+    refreshAll().finally(() => indicator.classList.add('hidden'));
+  }, { passive: true });
+})();
 
 // Buttons/tabs whose entire function needs the real server (account
 // creation, bulk import, admin user management) are disabled while offline
@@ -425,6 +492,23 @@ if (typeof OfflineSync !== 'undefined' && OfflineSync.enabled) {
   setInterval(updateOfflineGatedUI, 3000);
 }
 
+let liveRefreshInterval = null;
+// Nothing previously re-evaluated "is this follow-up now overdue" or
+// refreshed the reminders count over time — both only ever updated as a
+// side effect of some other action (creating/editing a contact), so
+// leaving the board open and just waiting for a due time to pass showed
+// nothing until the next unrelated action or a manual reload. renderBoard()
+// re-renders from data already in memory (no network needed — the overdue
+// check just compares against the current time), and loadReminders() goes
+// through api(), so offline it's answered from the local cache instantly.
+function startLiveRefresh() {
+  if (liveRefreshInterval) return;
+  liveRefreshInterval = setInterval(() => {
+    renderBoard();
+    loadReminders().catch(() => { /* stale badge until the next tick beats no badge at all */ });
+  }, 20000);
+}
+
 async function bootApp() {
   showApp();
   document.getElementById('currentUserInfo').textContent = currentUser ? `${currentUser.name} · ${currentUser.phone}` : '';
@@ -438,6 +522,7 @@ async function bootApp() {
     startOfflineStatusIndicator();
   }
   await refreshAll();
+  startLiveRefresh();
 
   if (pendingNotificationProspectId) {
     const id = pendingNotificationProspectId;
@@ -465,7 +550,7 @@ function renderBoard() {
       <div class="column-header">
         <p class="column-title">
           <span class="column-title-text">
-            <button class="collapse-toggle" data-stage="${stage.key}" title="Reduire / agrandir">${isCollapsed ? '▸' : '▾'}</button>
+            <button class="collapse-toggle" data-stage="${stage.key}" title="Reduire / agrandir">${isCollapsed ? icon('chevronRight') : icon('chevronDown')}</button>
             ${stage.label}
           </span>
           <span class="column-count">${items.length}</span>
@@ -499,22 +584,22 @@ function renderCard(p) {
 
   const wa = waLinkFromPhone(p.phone);
   const waLink = wa
-    ? `<a class="card-wa" href="${wa}" target="_blank" rel="noopener" title="Ouvrir WhatsApp" onclick="event.stopPropagation()">&#x1F4AC;</a>`
+    ? `<a class="card-wa" href="${wa}" target="_blank" rel="noopener" title="Ouvrir WhatsApp" onclick="event.stopPropagation()">${icon('messageCircle')}</a>`
     : '';
 
   const fbLink = (p.source === 'facebook' && p.facebook_profile_url)
-    ? `<a class="card-wa" href="${escapeHtml(p.facebook_profile_url)}" target="_blank" rel="noopener" title="Ouvrir le profil Facebook" onclick="event.stopPropagation()">&#x1F310;</a>`
+    ? `<a class="card-wa" href="${escapeHtml(p.facebook_profile_url)}" target="_blank" rel="noopener" title="Ouvrir le profil Facebook" onclick="event.stopPropagation()">${icon('globe')}</a>`
     : '';
 
   const altWa = waLinkFromPhone(p.alt_phone);
   const altWaLink = altWa
-    ? `<a class="card-wa" href="${altWa}" target="_blank" rel="noopener" title="Numero secondaire — WhatsApp" onclick="event.stopPropagation()">&#x1F4AC;²</a>`
+    ? `<a class="card-wa" href="${altWa}" target="_blank" rel="noopener" title="Numero secondaire — WhatsApp" onclick="event.stopPropagation()">${icon('messageCircle')}<sup>2</sup></a>`
     : '';
 
   let followupHtml = '';
   if (p.next_followup_at) {
     const isPast = new Date(p.next_followup_at) <= new Date();
-    followupHtml = `<div class="card-followup ${isPast ? 'overdue' : 'upcoming'}">${isPast ? '⏰ Relance en retard' : '📅 ' + formatDateTime(p.next_followup_at)}</div>`;
+    followupHtml = `<div class="card-followup ${isPast ? 'overdue' : 'upcoming'}">${isPast ? icon('alarmClock') + ' Relance en retard' : icon('calendar') + ' ' + formatDateTime(p.next_followup_at)}</div>`;
   }
 
   const locationBits = [p.quarter, p.city, p.country].filter(Boolean).join(', ');
@@ -528,7 +613,7 @@ function renderCard(p) {
       ${p.source ? `<span class="tag">${SOURCE_LABELS[p.source] || p.source}</span>` : ''}
       ${p.interest_type && p.interest_type !== 'indecis' ? `<span class="tag">${p.interest_type === 'opportunite' ? 'Opportunite' : 'Produit'}</span>` : ''}
     </div>
-    ${locationBits ? `<div class="card-meta"><span class="tag">📍 ${escapeHtml(locationBits)}</span></div>` : ''}
+    ${locationBits ? `<div class="card-meta"><span class="tag">${icon('mapPin')} ${escapeHtml(locationBits)}</span></div>` : ''}
     <div class="card-meta"><span>${relativeTime(p.stage_updated_at)}</span></div>
     ${followupHtml}
   `;
@@ -741,7 +826,7 @@ async function loadAdminUsers() {
     const isLocked = u.locked_until && new Date(u.locked_until) > new Date();
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td>${u.name}${u.is_admin ? ' <span title="Administrateur">👑</span>' : ''}</td>
+      <td>${u.name}${u.is_admin ? ` <span title="Administrateur">${icon('crown')}</span>` : ''}</td>
       <td>${u.phone}</td>
       <td>${u.is_active ? 'Actif' : 'Inactif'}</td>
       <td>${isLocked ? `Verrouille jusqu'a ${new Date(u.locked_until).toLocaleString('fr-FR')}` : '—'}</td>
@@ -1200,6 +1285,11 @@ document.querySelectorAll('[data-close]').forEach(btn => {
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { addModal.classList.add('hidden'); detailModal.classList.add('hidden'); importModal.classList.add('hidden'); }
 });
+
+// Prefill (never the password) so returning to the login screen doesn't
+// mean retyping the phone number every time.
+const rememberedPhone = localStorage.getItem('lastLoginPhone');
+if (rememberedPhone) document.querySelector('#loginForm input[name="phone"]').value = rememberedPhone;
 
 // ============================================
 // INIT: check for an existing session before showing either screen
