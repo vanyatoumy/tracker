@@ -651,7 +651,12 @@ main { padding: 24px 28px 60px; }
   overflow: hidden;
 }
 
-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 10px;
+}
+table { width: 100%; min-width: 640px; border-collapse: collapse; font-size: 13px; }
 th, td { text-align: left; padding: 11px 16px; }
 thead th {
   color: var(--text-muted);
