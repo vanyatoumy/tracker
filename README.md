@@ -4,6 +4,12 @@ Application de suivi de prospection pour distributeurs MLM/vente directe.
 Layer 1 uniquement : pipeline en 7 etapes, historique complet, relances, et
 benchmark de temps de conversion — pas de moteur de commissions (Layer 2, a venir).
 
+**Documentation complementaire** :
+[guide utilisateur](docs/guide-utilisateur.md) ·
+[documentation technique](docs/documentation-technique.md) ·
+[user guide (EN)](docs/user-guide.md) ·
+[technical docs (EN)](docs/technical.md)
+
 ## Demarrage rapide
 
 Prerequis : **Node.js 22.5 ou plus recent** (utilise le module natif `node:sqlite`,
@@ -216,7 +222,10 @@ a chaque redeploiement.
    ex. un service systemd avec `ExecStart=/usr/bin/node server.js` et
    `Restart=on-failure`.
 4. Mets un reverse proxy (nginx, Caddy) devant pour le TLS/HTTPS ; l'app
-   elle-meme n'ecoute qu'en HTTP en interne.
+   elle-meme n'ecoute qu'en HTTP en interne. Un `Caddyfile` pret a l'emploi
+   pour le domaine `suivipro.info` (TLS automatique via Let's Encrypt) est
+   fourni dans `deploy/Caddyfile` — voir `deploy/README.md` pour
+   l'installation (necessite un acces root).
 5. Cree le premier administrateur en CLI, directement sur le serveur (voir
    "Comptes admin" plus haut).
 

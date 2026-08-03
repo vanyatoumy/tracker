@@ -1,0 +1,3 @@
+suivipro.info {
+	reverse_proxy localhost:3000
+}
