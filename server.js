@@ -36,7 +36,17 @@ app.use(helmet({
             connectSrc: ["'self'"],
             objectSrc: ["'none'"],
             baseUri: ["'self'"],
-            frameAncestors: ["'self'"]
+            frameAncestors: ["'self'"],
+            // Helmet enables this by default, which makes the browser silently
+            // rewrite every subresource request (CSS/JS/img) to https:// before
+            // sending it. Fine behind a TLS-terminating reverse proxy, but fatal
+            // when the app is reached directly over plain HTTP (no Caddy/nginx
+            // in front yet) — nothing answers on 443, so every asset fails with
+            // a generic connection error and the page renders unstyled.
+            // TODO: remove this override once TLS is set up in front of the app
+            // (see deploy/README.md) — same change public/env.js and
+            // capacitor.config.json need at that point.
+            upgradeInsecureRequests: null
         }
     }
 }));
