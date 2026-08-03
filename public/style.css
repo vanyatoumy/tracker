@@ -117,6 +117,7 @@ button, input, select, textarea { font-family: inherit; }
   font-size: 12px;
   margin: -6px 0 0;
   min-height: 14px;
+  white-space: pre-line;
 }
 
 /* ---------- TOPBAR ---------- */
@@ -352,6 +353,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   border: 1px solid var(--border);
   border-radius: 6px;
   white-space: nowrap;
+}
+.current-user-info.subscription-warning {
+  color: var(--red);
+  border-color: var(--red);
 }
 
 .offline-status {
@@ -677,6 +682,10 @@ tbody tr:not(:last-child) td { border-bottom: 1px solid var(--border); }
 .import-hint code { color: var(--text); background: var(--bg); padding: 1px 5px; border-radius: 4px; }
 .import-status { font-size: 13px; line-height: 1.6; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
 .import-status.error { color: #ff6b6b; border-color: #ff6b6b55; }
+
+.subscription-body { display: flex; flex-direction: column; gap: 10px; }
+.subscription-body h3 { font-family: var(--font-display); font-size: 14px; margin: 8px 0 0; }
+.subscription-body p { color: var(--text-muted); font-size: 13px; line-height: 1.5; margin: 0; }
 .modal-actions { display: flex; justify-content: flex-end; }
 
 /* ---------- ARCHIVED ---------- */

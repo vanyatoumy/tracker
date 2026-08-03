@@ -256,8 +256,14 @@ document.getElementById('registerForm').addEventListener('submit', async (e) => 
     // to the login tab and show the activation notice there instead.
     e.target.reset();
     document.querySelector('.auth-tab-btn[data-auth="login"]').click();
-    document.getElementById('loginError').textContent =
-      result.message || 'Compte cree. Il doit etre active par un administrateur avant que tu puisses te connecter.';
+    let message = result.message || 'Compte cree. Il doit etre active par un administrateur avant que tu puisses te connecter.';
+    try {
+      const info = await api('/api/subscription/info');
+      if (info.price || info.instructions) {
+        message += `\n\n${info.price ? `Prix : ${info.price}. ` : ''}${info.instructions || ''}${info.contact ? ` (${info.contact})` : ''}`;
+      }
+    } catch { /* payment info is optional — skip silently if unreachable */ }
+    document.getElementById('loginError').textContent = message;
   } catch (err) {
     errEl.textContent = err.message;
   }
@@ -511,7 +517,19 @@ function startLiveRefresh() {
 
 async function bootApp() {
   showApp();
-  document.getElementById('currentUserInfo').textContent = currentUser ? `${currentUser.name} · ${currentUser.phone}` : '';
+  const userInfoEl = document.getElementById('currentUserInfo');
+  userInfoEl.textContent = currentUser ? `${currentUser.name} · ${currentUser.phone}` : '';
+  // Nudge before it becomes a lockout: subscription expiry isn't enforced
+  // client-side (the real gate is server-side, at next login — see
+  // server.js), this is purely a heads-up while the current session is
+  // still valid.
+  const daysLeft = subscriptionDaysLeft(currentUser?.subscription_expires_at);
+  if (currentUser && daysLeft !== null && daysLeft <= 5) {
+    userInfoEl.textContent += ` · Abonnement : ${daysLeft <= 0 ? 'expire' : daysLeft + ' jour' + (daysLeft > 1 ? 's' : '') + ' restant' + (daysLeft > 1 ? 's' : '')}`;
+    userInfoEl.classList.add('subscription-warning');
+  } else {
+    userInfoEl.classList.remove('subscription-warning');
+  }
   document.getElementById('adminTabBtn').classList.toggle('hidden', !currentUser?.is_admin);
   populateDialSelects();
   populateCountrySelects();
@@ -808,16 +826,60 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 });
 
 // ============================================
+// SUBSCRIPTION (manual payment — see config.js / server.js /api/subscription/info)
+// ============================================
+function subscriptionDaysLeft(expiresAt) {
+  if (!expiresAt) return null;
+  return Math.ceil((new Date(expiresAt) - new Date()) / (24 * 60 * 60 * 1000));
+}
+
+function subscriptionCellText(expiresAt) {
+  if (!expiresAt) return '—';
+  const days = subscriptionDaysLeft(expiresAt);
+  const dateStr = new Date(expiresAt).toLocaleDateString('fr-FR');
+  if (days < 0) return `Expire depuis le ${dateStr}`;
+  if (days === 0) return `Expire aujourd'hui (${dateStr})`;
+  return `${dateStr} (${days} jour${days > 1 ? 's' : ''})`;
+}
+
+document.getElementById('subscriptionBtn').addEventListener('click', async () => {
+  const statusEl = document.getElementById('subscriptionStatus');
+  const paymentEl = document.getElementById('subscriptionPayment');
+  statusEl.textContent = 'Chargement...';
+  paymentEl.classList.add('hidden');
+  document.getElementById('subscriptionModal').classList.remove('hidden');
+
+  const days = subscriptionDaysLeft(currentUser?.subscription_expires_at);
+  if (days === null) {
+    statusEl.textContent = "Aucun abonnement actif pour l'instant.";
+  } else if (days < 0) {
+    statusEl.textContent = `Ton abonnement a expire le ${new Date(currentUser.subscription_expires_at).toLocaleDateString('fr-FR')}.`;
+  } else {
+    statusEl.textContent = `Abonnement actif jusqu'au ${new Date(currentUser.subscription_expires_at).toLocaleDateString('fr-FR')} (${days} jour${days > 1 ? 's' : ''} restant${days > 1 ? 's' : ''}).`;
+  }
+
+  try {
+    const info = await api('/api/subscription/info');
+    if (info.price || info.instructions) {
+      document.getElementById('subscriptionPrice').textContent = info.price ? `Prix : ${info.price}` : '';
+      document.getElementById('subscriptionInstructions').textContent = info.instructions || '';
+      document.getElementById('subscriptionContact').textContent = info.contact ? `Contact : ${info.contact}` : '';
+      paymentEl.classList.remove('hidden');
+    }
+  } catch { /* payment info is optional — skip silently if unreachable (e.g. offline) */ }
+});
+
+// ============================================
 // ADMIN (visible only to accounts with is_admin — see bootApp)
 // ============================================
 async function loadAdminUsers() {
   const tbody = document.querySelector('#adminUsersTable tbody');
-  tbody.innerHTML = '<tr><td colspan="6">Chargement...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="7">Chargement...</td></tr>';
   let users;
   try {
     users = await api('/api/admin/users');
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="6">${err.message}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7">${err.message}</td></tr>`;
     return;
   }
 
@@ -829,6 +891,7 @@ async function loadAdminUsers() {
       <td>${u.name}${u.is_admin ? ` <span title="Administrateur">${icon('crown')}</span>` : ''}</td>
       <td>${u.phone}</td>
       <td>${u.is_active ? 'Actif' : 'Inactif'}</td>
+      <td>${subscriptionCellText(u.subscription_expires_at)}</td>
       <td>${isLocked ? `Verrouille jusqu'a ${new Date(u.locked_until).toLocaleString('fr-FR')}` : '—'}</td>
       <td>${new Date(u.created_at).toLocaleDateString('fr-FR')}</td>
       <td class="admin-actions"></td>
@@ -837,7 +900,11 @@ async function loadAdminUsers() {
 
     const toggleBtn = document.createElement('button');
     toggleBtn.className = 'btn-ghost';
-    toggleBtn.textContent = u.is_active ? 'Desactiver' : 'Activer';
+    // Activating isn't just an on/off flip here: it also (re)starts a fresh
+    // SUBSCRIPTION_DURATION_DAYS window from now (see db.setUserActiveById),
+    // so this button doubles as "renew" for an already-active account whose
+    // subscription is running low.
+    toggleBtn.textContent = u.is_active ? 'Desactiver' : 'Activer / Renouveler';
     toggleBtn.addEventListener('click', async () => {
       toggleBtn.disabled = true;
       try {
@@ -1272,18 +1339,20 @@ document.getElementById('deleteBtn').addEventListener('click', async () => {
 // ============================================
 // MODAL CLOSE HELPERS
 // ============================================
+const subscriptionModal = document.getElementById('subscriptionModal');
 document.querySelectorAll('[data-close]').forEach(btn => {
   btn.addEventListener('click', () => {
     addModal.classList.add('hidden');
     detailModal.classList.add('hidden');
     importModal.classList.add('hidden');
+    subscriptionModal.classList.add('hidden');
   });
 });
-[addModal, detailModal, importModal].forEach(m => {
+[addModal, detailModal, importModal, subscriptionModal].forEach(m => {
   m.addEventListener('click', (e) => { if (e.target === m) m.classList.add('hidden'); });
 });
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') { addModal.classList.add('hidden'); detailModal.classList.add('hidden'); importModal.classList.add('hidden'); }
+  if (e.key === 'Escape') { addModal.classList.add('hidden'); detailModal.classList.add('hidden'); importModal.classList.add('hidden'); subscriptionModal.classList.add('hidden'); }
 });
 
 // Prefill (never the password) so returning to the login screen doesn't

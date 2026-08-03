@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS users (
     is_admin        INTEGER NOT NULL DEFAULT 0,
     failed_login_attempts INTEGER NOT NULL DEFAULT 0,
     locked_until    TEXT,
+    subscription_expires_at TEXT,          -- NULL until first admin activation
     created_at      TEXT NOT NULL
 );
 
@@ -124,6 +125,9 @@ END;
     if (!cols.includes('locked_until')) {
         db.exec(`ALTER TABLE users ADD COLUMN locked_until TEXT;`);
     }
+    if (!cols.includes('subscription_expires_at')) {
+        db.exec(`ALTER TABLE users ADD COLUMN subscription_expires_at TEXT;`);
+    }
 })();
 
 (function migrateProspectColumns() {
@@ -185,18 +189,18 @@ function findUserByPhone(phone) {
 }
 
 function getUserById(id) {
-    return db.prepare(`SELECT id, name, phone, is_active, is_admin, created_at FROM users WHERE id = ?`).get(id);
+    return db.prepare(`SELECT id, name, phone, is_active, is_admin, subscription_expires_at, created_at FROM users WHERE id = ?`).get(id);
 }
 
 function listAllUsers() {
-    return db.prepare(`SELECT id, name, phone, is_active, is_admin, created_at FROM users ORDER BY created_at ASC`).all();
+    return db.prepare(`SELECT id, name, phone, is_active, is_admin, subscription_expires_at, created_at FROM users ORDER BY created_at ASC`).all();
 }
 
 // Fuller view for the admin API — includes lockout state, which regular
 // listAllUsers() (also used by the CLI scripts) doesn't need to show.
 function adminListUsers() {
     return db.prepare(`
-        SELECT id, name, phone, is_active, is_admin, failed_login_attempts, locked_until, created_at
+        SELECT id, name, phone, is_active, is_admin, failed_login_attempts, locked_until, subscription_expires_at, created_at
         FROM users ORDER BY created_at ASC
     `).all();
 }
@@ -228,18 +232,28 @@ function setUserAdmin(phone, isAdmin) {
     return { id: user.id, name: user.name, phone: user.phone, is_admin: isAdmin ? 1 : 0 };
 }
 
+// There's no payment gateway — a user pays out-of-band and an admin
+// activates the account manually, once, per subscription period. Every
+// activation (new account or renewal — same "Activer" action) grants a
+// fresh SUBSCRIPTION_DURATION_DAYS window from *now*, not from any previous
+// expiry, so a lapsed renewal doesn't accumulate unpaid days.
+function subscriptionExpiryFromNow() {
+    return new Date(Date.now() + config.SUBSCRIPTION_DURATION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+}
+
 // Admin-only: activate/deactivate a user directly (used by
 // scripts/activate-account.js, not exposed via any HTTP route).
 function setUserActive(phone, active) {
     const user = findUserByPhone(phone);
     if (!user) throw new NotFoundError(`Aucun compte trouve pour le numero ${phone}`);
-    db.prepare(`UPDATE users SET is_active = ? WHERE id = ?`).run(active ? 1 : 0, user.id);
+    const expiresAt = active ? subscriptionExpiryFromNow() : user.subscription_expires_at;
+    db.prepare(`UPDATE users SET is_active = ?, subscription_expires_at = ? WHERE id = ?`).run(active ? 1 : 0, expiresAt, user.id);
     // Activating a previously-blocked account should also clear any lockout
     // left over from failed attempts, so it isn't immediately re-blocked.
     if (active) {
         db.prepare(`UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = ?`).run(user.id);
     }
-    return { id: user.id, name: user.name, phone: user.phone, is_active: active ? 1 : 0 };
+    return { id: user.id, name: user.name, phone: user.phone, is_active: active ? 1 : 0, subscription_expires_at: expiresAt };
 }
 
 // ---- id-based variants used by the admin HTTP API (server.js) ----
@@ -247,13 +261,14 @@ function setUserActive(phone, active) {
 // terminal knows the phone number, not the internal id; the admin API
 // operates on ids returned by adminListUsers().
 function setUserActiveById(userId, active) {
-    const user = db.prepare(`SELECT id, name, phone FROM users WHERE id = ?`).get(userId);
+    const user = db.prepare(`SELECT id, name, phone, subscription_expires_at FROM users WHERE id = ?`).get(userId);
     if (!user) throw new NotFoundError('Compte introuvable');
-    db.prepare(`UPDATE users SET is_active = ? WHERE id = ?`).run(active ? 1 : 0, userId);
+    const expiresAt = active ? subscriptionExpiryFromNow() : user.subscription_expires_at;
+    db.prepare(`UPDATE users SET is_active = ?, subscription_expires_at = ? WHERE id = ?`).run(active ? 1 : 0, expiresAt, userId);
     if (active) {
         db.prepare(`UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = ?`).run(userId);
     }
-    return { id: user.id, name: user.name, phone: user.phone, is_active: active ? 1 : 0 };
+    return { id: user.id, name: user.name, phone: user.phone, is_active: active ? 1 : 0, subscription_expires_at: expiresAt };
 }
 
 function unlockUserById(userId) {

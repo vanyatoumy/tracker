@@ -36,15 +36,7 @@ app.use(helmet({
             connectSrc: ["'self'"],
             objectSrc: ["'none'"],
             baseUri: ["'self'"],
-            frameAncestors: ["'self'"],
-            // Helmet enables this by default, which makes the browser silently
-            // rewrite every subresource request (CSS/JS/img) to https:// before
-            // sending it. Fine behind a TLS-terminating reverse proxy, but fatal
-            // when the app is reached directly over plain HTTP (no nginx/Caddy
-            // in front yet) — nothing answers on 443, so every asset fails with
-            // a generic connection error and the page renders unstyled.
-            // TODO: remove this override once TLS is set up in front of the app.
-            upgradeInsecureRequests: null
+            frameAncestors: ["'self'"]
         }
     }
 }));
@@ -146,6 +138,21 @@ function requireAdmin(req, res, next) {
 
 // ---------- AUTH ROUTES ----------
 
+// Public (no auth): payment instructions shown both pre-login (right after
+// registering, since new accounts need to pay before an admin will activate
+// them) and in the logged-in "Mon abonnement" panel. Plain text from
+// config/.env — there's no payment gateway, this just tells the user how to
+// pay the admin directly. Fields are blank strings if unset in .env; the
+// frontend hides the panel entirely when price/instructions are empty.
+app.get('/api/subscription/info', (req, res) => {
+    res.json({
+        price: config.SUBSCRIPTION_PRICE,
+        duration_days: config.SUBSCRIPTION_DURATION_DAYS,
+        instructions: config.SUBSCRIPTION_PAYMENT_INSTRUCTIONS,
+        contact: config.SUBSCRIPTION_CONTACT
+    });
+});
+
 app.post('/api/auth/register', authLimiter, (req, res) => {
     try {
         const name = validate.str(req.body.name, 'Le nom', { required: true, maxLength: 100 });
@@ -163,7 +170,7 @@ app.post('/api/auth/register', authLimiter, (req, res) => {
         const user = db.createUser({ name, phone, password });
         res.status(201).json({
             ...user,
-            message: "Compte cree. Il doit etre active par un administrateur avant que tu puisses te connecter."
+            message: "Compte cree. Effectue le paiement de l'abonnement (voir instructions) puis envoie la preuve a l'administrateur pour qu'il active ton compte."
         });
     } catch (err) { handleError(res, err); }
 });
@@ -190,6 +197,18 @@ app.post('/api/auth/login', authLimiter, (req, res) => {
             throw new AuthError('Numero ou mot de passe incorrect');
         }
 
+        // Manual subscription model (no payment gateway — see config.js):
+        // every admin activation grants a fixed window from that moment.
+        // Checked before the plain is_active gate so a lapsed subscription
+        // gets a distinct "renew" message instead of the generic
+        // "not yet activated" one. If still marked active past its expiry
+        // (e.g. the admin hasn't looked at it), flip it off now so it
+        // doesn't linger as active until some other cron/action catches it.
+        if (user.subscription_expires_at && new Date(user.subscription_expires_at) < new Date()) {
+            if (user.is_active) db.setUserActiveById(user.id, false);
+            throw new AuthError('Ton abonnement a expire. Contacte l\'administrateur pour le renouveler.');
+        }
+
         if (!user.is_active) {
             throw new AuthError('Ce compte n\'a pas encore ete active. Contacte l\'administrateur.');
         }
@@ -197,7 +216,7 @@ app.post('/api/auth/login', authLimiter, (req, res) => {
         db.clearFailedLogins(user.id);
         const { token, expires_at } = db.createSession(user.id);
         setSessionCookie(res, token, expires_at);
-        const body = { id: user.id, name: user.name, phone: user.phone, is_admin: !!user.is_admin };
+        const body = { id: user.id, name: user.name, phone: user.phone, is_admin: !!user.is_admin, subscription_expires_at: user.subscription_expires_at };
         // Only the native app needs the raw token (it can't use the cookie
         // cross-origin — see the CORS comment above). Putting it in the JSON
         // body for every client, including the web version, would defeat

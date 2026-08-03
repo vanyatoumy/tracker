@@ -52,6 +52,21 @@ module.exports = {
     RATE_LIMIT_AUTH_MAX: parseInt10(process.env.RATE_LIMIT_AUTH_MAX, 20),
     RATE_LIMIT_AUTH_WINDOW_MIN: parseInt10(process.env.RATE_LIMIT_AUTH_WINDOW_MIN, 15),
 
+    // Manual subscription model: there's no payment gateway integration —
+    // a user pays out-of-band (Mobile Money, etc.) and sends proof to the
+    // admin, who then activates the account via the existing admin
+    // activate/deactivate toggle. Every activation grants exactly this many
+    // days of access (see db.setUserActiveById); past that, the account is
+    // auto-deactivated on next login attempt.
+    SUBSCRIPTION_DURATION_DAYS: parseInt10(process.env.SUBSCRIPTION_DURATION_DAYS, 30),
+
+    // Shown to users in the app (pre-login payment instructions, "My
+    // subscription" panel) — plain text/strings, not used for anything
+    // functional. Safe to leave the defaults and override in .env.
+    SUBSCRIPTION_PRICE: process.env.SUBSCRIPTION_PRICE || '',
+    SUBSCRIPTION_PAYMENT_INSTRUCTIONS: process.env.SUBSCRIPTION_PAYMENT_INSTRUCTIONS || '',
+    SUBSCRIPTION_CONTACT: process.env.SUBSCRIPTION_CONTACT || '',
+
     // Where local backup snapshots (gzip-compressed .db.gz files) are
     // written before optionally being pushed offsite. See scripts/backup.js
     // and README "Sauvegardes".
