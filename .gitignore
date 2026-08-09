@@ -1,5 +1,9 @@
 node_modules/
 data/
+# APK releases: deployed straight to the VPS (scp), not committed — binary
+# files don't belong in git history, they'd bloat the repo forever. See
+# public/downloads/README.md.
+public/downloads/*.apk
 *.log
 tests/.tmp-*.db*
 data/backups/
