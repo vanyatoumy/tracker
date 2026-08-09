@@ -59,14 +59,14 @@ app.use((req, res, next) => { if (!req.body || typeof req.body !== 'object') req
 app.use(cookieParser());
 
 // The mobile app is bundled locally (not served from this origin), so its
-// requests are cross-origin — Capacitor's local-content origin on Android,
-// set to plain http (not the https default) in capacitor.config.json's
-// androidScheme, so it doesn't trip mixed-content blocking when calling
-// this plain-HTTP API (there's no TLS anywhere in this setup yet). It
+// requests are cross-origin — Capacitor's local-content origin on Android.
+// Now that the API is HTTPS (see deploy/README.md), capacitor.config.json
+// no longer overrides androidScheme away from Capacitor's default, which is
+// "https" — so the WebView's origin is https://localhost, not http. It
 // authenticates via a Bearer token instead of the session cookie (see
 // getTokenFromRequest/setSessionCookie below), so this doesn't need
 // Access-Control-Allow-Credentials — no cookies cross that boundary.
-const NATIVE_APP_ORIGIN = 'http://localhost';
+const NATIVE_APP_ORIGIN = 'https://localhost';
 app.use((req, res, next) => {
     if (req.headers.origin === NATIVE_APP_ORIGIN) {
         res.setHeader('Access-Control-Allow-Origin', NATIVE_APP_ORIGIN);
