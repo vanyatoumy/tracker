@@ -3,6 +3,11 @@
 Run these on the VPS (54.38.242.120) once DNS has propagated. Requires root
 (sudo) — hand this file to whoever administers the server.
 
+**Note**: this VPS already runs nginx on port 443 for another site, so we
+use nginx + certbot for suivipro.info instead of Caddy (a Caddyfile is
+still in this folder in case that ever changes, but it's not the active
+path — see "Why not Caddy" at the bottom).
+
 ## 1. DNS
 
 At your registrar, create an A record:
@@ -17,25 +22,29 @@ Wait for it to resolve before continuing:
 dig +short suivipro.info
 ```
 
-## 2. Install Caddy
+## 2. Add the nginx site config
 
 ```bash
-sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
-sudo apt update
-sudo apt install -y caddy
+sudo cp deploy/nginx-suivipro.conf /etc/nginx/sites-available/suivipro.info
+sudo ln -s /etc/nginx/sites-available/suivipro.info /etc/nginx/sites-enabled/
+sudo nginx -t          # sanity-check the config before reloading
+sudo systemctl reload nginx
 ```
 
-## 3. Deploy the Caddyfile
+At this point `http://suivipro.info` should already reverse-proxy to the
+Node app on port 3000 (no TLS yet — that's next).
+
+## 3. Get a certificate with certbot
 
 ```bash
-sudo cp deploy/Caddyfile /etc/caddy/Caddyfile
-sudo systemctl reload caddy
+sudo apt install -y certbot python3-certbot-nginx
+sudo certbot --nginx -d suivipro.info
 ```
 
-Caddy automatically requests and renews a Let's Encrypt certificate for
-`suivipro.info` the first time it starts — no manual certbot step needed.
+certbot's nginx plugin edits `/etc/nginx/sites-available/suivipro.info`
+in place: adds the `listen 443 ssl` block with the issued certificate, and
+an HTTP → HTTPS redirect. It also sets up auto-renewal (a systemd timer,
+`certbot.timer` — check with `systemctl list-timers | grep certbot`).
 
 ## 4. Firewall
 
@@ -82,3 +91,23 @@ npx cap sync android
 ```
 
 then rebuild in Android Studio.
+
+---
+
+### Why not Caddy
+
+The original plan was Caddy, which handles TLS automatically with less
+config. That assumed port 443 was free. This VPS's nginx already holds
+443 for another site, and nginx can't share a port with another server
+listening directly on it (unlike hosting multiple *domains* on nginx
+itself, which nginx does natively via server blocks/SNI — that's exactly
+what step 2 above relies on). Two options existed once that was known:
+
+1. **Add suivipro.info as another nginx server block** (what we did) —
+   minimal disruption, reuses the nginx + certbot stack already on the box.
+2. Run Caddy on an alternate port and have nginx proxy *to* Caddy for this
+   one domain — more moving parts for no real benefit here.
+
+Option 1 was simpler and is what `deploy/nginx-suivipro.conf` implements.
+`deploy/Caddyfile` is left in place only in case this VPS's nginx usage
+ever changes and Caddy becomes viable again.
