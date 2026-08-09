@@ -8,4 +8,4 @@
 // this is baked into the bundle, so a reload alone won't pick it up).
 //
 // The web version doesn't use this at all — it's always same-origin there.
-const API_BASE_URL = 'http://54.38.242.120:3000';
+const API_BASE_URL = 'https://suivipro.info';

@@ -2,10 +2,6 @@
   "appId": "com.suiviprospection.app",
   "appName": "Suivi Prospection",
   "webDir": "public",
-  "server": {
-    "cleartext": true,
-    "androidScheme": "http"
-  },
   "plugins": {
     "LocalNotifications": {
       "smallIcon": "ic_stat_notify",
