@@ -92,6 +92,21 @@ CREATE TABLE IF NOT EXISTS interactions (
 
 CREATE INDEX IF NOT EXISTS idx_interactions_prospect ON interactions(prospect_id);
 
+-- Failed-login tracking per (account, client IP). Locking per account alone
+-- let anyone who knew a phone number keep its owner locked out forever just
+-- by sending 4 wrong passwords every 15 minutes; scoped per IP, an attacker
+-- only locks themselves out, while the owner's own device keeps working.
+-- Supersedes users.failed_login_attempts / users.locked_until (kept in the
+-- table for old databases, no longer read).
+CREATE TABLE IF NOT EXISTS login_failures (
+    user_id         TEXT NOT NULL,
+    ip              TEXT NOT NULL,
+    attempts        INTEGER NOT NULL DEFAULT 0,
+    locked_until    TEXT,
+    PRIMARY KEY (user_id, ip),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 CREATE TRIGGER IF NOT EXISTS trg_update_stage_timestamp
 AFTER INSERT ON stage_history
 BEGIN
@@ -198,11 +213,16 @@ function listAllUsers() {
 
 // Fuller view for the admin API — includes lockout state, which regular
 // listAllUsers() (also used by the CLI scripts) doesn't need to show.
+// Lockouts are per (account, IP) — see login_failures — so locked_until here
+// is the latest one still in force across all IPs, i.e. "someone is being
+// locked out of this account somewhere".
 function adminListUsers() {
     return db.prepare(`
-        SELECT id, name, phone, is_active, is_admin, failed_login_attempts, locked_until, subscription_expires_at, created_at
+        SELECT id, name, phone, is_active, is_admin, subscription_expires_at, created_at,
+            (SELECT COALESCE(SUM(attempts), 0) FROM login_failures lf WHERE lf.user_id = users.id) AS failed_login_attempts,
+            (SELECT MAX(locked_until) FROM login_failures lf WHERE lf.user_id = users.id AND lf.locked_until > ?) AS locked_until
         FROM users ORDER BY created_at ASC
-    `).all();
+    `).all(now());
 }
 
 // Admin-only: reset a user's password directly (used by scripts/reset-password.js,
@@ -213,9 +233,9 @@ function resetPasswordByPhone(phone, newPassword) {
     if (!user) throw new NotFoundError(`Aucun compte trouve pour le numero ${phone}`);
 
     const { salt, hash } = hashPassword(newPassword);
-    db.prepare(`UPDATE users SET password_hash = ?, password_salt = ?, failed_login_attempts = 0, locked_until = NULL WHERE id = ?`)
-        .run(hash, salt, user.id);
-    db.prepare(`DELETE FROM sessions WHERE user_id = ?`).run(user.id);
+    db.prepare(`UPDATE users SET password_hash = ?, password_salt = ? WHERE id = ?`).run(hash, salt, user.id);
+    clearAllFailedLogins(user.id);
+    deleteSessionsForUser(user.id);
 
     return { id: user.id, name: user.name, phone: user.phone };
 }
@@ -246,14 +266,7 @@ function subscriptionExpiryFromNow() {
 function setUserActive(phone, active) {
     const user = findUserByPhone(phone);
     if (!user) throw new NotFoundError(`Aucun compte trouve pour le numero ${phone}`);
-    const expiresAt = active ? subscriptionExpiryFromNow() : user.subscription_expires_at;
-    db.prepare(`UPDATE users SET is_active = ?, subscription_expires_at = ? WHERE id = ?`).run(active ? 1 : 0, expiresAt, user.id);
-    // Activating a previously-blocked account should also clear any lockout
-    // left over from failed attempts, so it isn't immediately re-blocked.
-    if (active) {
-        db.prepare(`UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = ?`).run(user.id);
-    }
-    return { id: user.id, name: user.name, phone: user.phone, is_active: active ? 1 : 0, subscription_expires_at: expiresAt };
+    return setUserActiveById(user.id, active);
 }
 
 // ---- id-based variants used by the admin HTTP API (server.js) ----
@@ -266,7 +279,14 @@ function setUserActiveById(userId, active) {
     const expiresAt = active ? subscriptionExpiryFromNow() : user.subscription_expires_at;
     db.prepare(`UPDATE users SET is_active = ?, subscription_expires_at = ? WHERE id = ?`).run(active ? 1 : 0, expiresAt, userId);
     if (active) {
-        db.prepare(`UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = ?`).run(userId);
+        // Activating a previously-blocked account should also clear any
+        // lockout left over from failed attempts, so it isn't immediately
+        // re-blocked.
+        clearAllFailedLogins(userId);
+    } else {
+        // Deactivation must take effect now, not whenever the user's
+        // existing sessions happen to expire (up to SESSION_DURATION_DAYS).
+        deleteSessionsForUser(userId);
     }
     return { id: user.id, name: user.name, phone: user.phone, is_active: active ? 1 : 0, subscription_expires_at: expiresAt };
 }
@@ -274,7 +294,7 @@ function setUserActiveById(userId, active) {
 function unlockUserById(userId) {
     const user = db.prepare(`SELECT id, name, phone FROM users WHERE id = ?`).get(userId);
     if (!user) throw new NotFoundError('Compte introuvable');
-    db.prepare(`UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = ?`).run(userId);
+    clearAllFailedLogins(userId);
     return { id: user.id, name: user.name, phone: user.phone };
 }
 
@@ -287,30 +307,50 @@ function resetPasswordById(userId, newPassword) {
     if (!user) throw new NotFoundError('Compte introuvable');
 
     const { salt, hash } = hashPassword(newPassword);
-    db.prepare(`UPDATE users SET password_hash = ?, password_salt = ?, failed_login_attempts = 0, locked_until = NULL WHERE id = ?`)
-        .run(hash, salt, userId);
-    db.prepare(`DELETE FROM sessions WHERE user_id = ?`).run(userId);
+    db.prepare(`UPDATE users SET password_hash = ?, password_salt = ? WHERE id = ?`).run(hash, salt, userId);
+    clearAllFailedLogins(userId);
+    deleteSessionsForUser(userId);
 
     return { id: user.id, name: user.name, phone: user.phone };
 }
 
-// Called on every failed password check. Once the account hits
-// FAILED_LOGIN_LOCK_THRESHOLD consecutive failures, it's locked for
-// LOCKOUT_DURATION_MIN minutes and the counter resets.
-function registerFailedLogin(userId) {
-    const user = db.prepare(`SELECT failed_login_attempts FROM users WHERE id = ?`).get(userId);
-    const attempts = (user?.failed_login_attempts || 0) + 1;
-    if (attempts >= FAILED_LOGIN_LOCK_THRESHOLD) {
-        const lockedUntil = new Date(Date.now() + LOCKOUT_DURATION_MIN * 60 * 1000).toISOString();
-        db.prepare(`UPDATE users SET failed_login_attempts = 0, locked_until = ? WHERE id = ?`).run(lockedUntil, userId);
-        return { locked: true, lockedUntil };
-    }
-    db.prepare(`UPDATE users SET failed_login_attempts = ? WHERE id = ?`).run(attempts, userId);
-    return { locked: false, attemptsRemaining: FAILED_LOGIN_LOCK_THRESHOLD - attempts };
+// ---- failed-login lockout, per (account, IP) — see login_failures ----
+
+// Returns the ISO timestamp this account is locked until *for this IP*, or
+// null if that IP may try a password right now.
+function getLoginLockedUntil(userId, ip) {
+    const row = db.prepare(`SELECT locked_until FROM login_failures WHERE user_id = ? AND ip = ?`).get(userId, ip);
+    if (!row || !row.locked_until) return null;
+    return new Date(row.locked_until) > new Date() ? row.locked_until : null;
 }
 
-function clearFailedLogins(userId) {
-    db.prepare(`UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = ?`).run(userId);
+// Called on every failed password check. Once an IP hits
+// FAILED_LOGIN_LOCK_THRESHOLD consecutive failures on an account, that IP is
+// locked out of that account for LOCKOUT_DURATION_MIN minutes and its
+// counter resets.
+function registerFailedLogin(userId, ip) {
+    const row = db.prepare(`SELECT attempts FROM login_failures WHERE user_id = ? AND ip = ?`).get(userId, ip);
+    const attempts = (row?.attempts || 0) + 1;
+    const locked = attempts >= FAILED_LOGIN_LOCK_THRESHOLD;
+    const lockedUntil = locked ? new Date(Date.now() + LOCKOUT_DURATION_MIN * 60 * 1000).toISOString() : null;
+    db.prepare(`
+        INSERT INTO login_failures (user_id, ip, attempts, locked_until) VALUES (?, ?, ?, ?)
+        ON CONFLICT (user_id, ip) DO UPDATE SET attempts = excluded.attempts, locked_until = excluded.locked_until
+    `).run(userId, ip, locked ? 0 : attempts, lockedUntil);
+    return locked
+        ? { locked: true, lockedUntil }
+        : { locked: false, attemptsRemaining: FAILED_LOGIN_LOCK_THRESHOLD - attempts };
+}
+
+// A successful login only clears that IP's counter — lockouts other IPs
+// earned on this account (e.g. an attacker's) stay in force.
+function clearFailedLogins(userId, ip) {
+    db.prepare(`DELETE FROM login_failures WHERE user_id = ? AND ip = ?`).run(userId, ip);
+}
+
+// Admin unlock / activation / password reset: wipe every IP's lockout.
+function clearAllFailedLogins(userId) {
+    db.prepare(`DELETE FROM login_failures WHERE user_id = ?`).run(userId);
 }
 
 // ============================================
@@ -341,6 +381,10 @@ function getSession(token) {
 
 function deleteSession(token) {
     db.prepare(`DELETE FROM sessions WHERE token = ?`).run(token);
+}
+
+function deleteSessionsForUser(userId) {
+    db.prepare(`DELETE FROM sessions WHERE user_id = ?`).run(userId);
 }
 
 // ============================================
@@ -698,12 +742,15 @@ module.exports = {
     setUserActiveById,
     unlockUserById,
     resetPasswordById,
+    getLoginLockedUntil,
     registerFailedLogin,
     clearFailedLogins,
+    clearAllFailedLogins,
     verifyPassword,
     createSession,
     getSession,
     deleteSession,
+    deleteSessionsForUser,
     createProspect,
     bulkImportProspects,
     getProspect,

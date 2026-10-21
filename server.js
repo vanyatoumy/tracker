@@ -119,21 +119,49 @@ function getTokenFromRequest(req) {
     if (authHeader && authHeader.startsWith('Bearer ')) return authHeader.slice(7);
     return req.cookies[COOKIE_NAME];
 }
+
+// Manual subscription model (no payment gateway — see config.js): every
+// admin activation grants a fixed window from that moment. Returns the
+// message to refuse access with, or null if the account may use the app.
+// Expiry is checked before the plain is_active gate so a lapsed
+// subscription gets a distinct "renew" message instead of the generic "not
+// yet activated" one. If still marked active past its expiry (e.g. the
+// admin hasn't looked at it), it's flipped off right here so it doesn't
+// linger as active until some other action catches it.
+function accountAccessError(user) {
+    if (user.subscription_expires_at && new Date(user.subscription_expires_at) < new Date()) {
+        if (user.is_active) db.setUserActiveById(user.id, false);
+        return 'Ton abonnement a expire. Contacte l\'administrateur pour le renouveler.';
+    }
+    if (!user.is_active) {
+        return 'Ce compte n\'a pas encore ete active. Contacte l\'administrateur.';
+    }
+    return null;
+}
+
+// Checked on every request, not just at login: a session outlives the
+// subscription window (SESSION_DURATION_DAYS vs SUBSCRIPTION_DURATION_DAYS)
+// and an admin deactivation, so gating only the login would leave already
+// logged-in users with full access until their session expired.
 function requireAuth(req, res, next) {
     const token = getTokenFromRequest(req);
     if (!token) return res.status(401).json({ error: 'Non authentifie' });
     const session = db.getSession(token);
     if (!session) return res.status(401).json({ error: 'Session expiree, reconnecte-toi' });
-    req.userId = session.user_id;
+    const user = db.getUserById(session.user_id);
+    const accessError = user ? accountAccessError(user) : 'Compte introuvable';
+    if (accessError) {
+        db.deleteSession(token);
+        return res.status(401).json({ error: accessError });
+    }
+    req.userId = user.id;
+    req.user = user;
     next();
 }
 
-// Must run after requireAuth (needs req.userId). Kept separate rather than
-// folded into requireAuth so ordinary routes don't pay for an extra DB
-// lookup just to check a flag they never use.
+// Must run after requireAuth (needs req.user).
 function requireAdmin(req, res, next) {
-    const user = db.getUserById(req.userId);
-    if (!user || !user.is_admin) {
+    if (!req.user.is_admin) {
         return res.status(403).json({ error: 'Acces reserve aux administrateurs' });
     }
     next();
@@ -189,34 +217,24 @@ app.post('/api/auth/login', authLimiter, (req, res) => {
 
         // Check lockout before touching the password, so a locked account
         // gets a clear "try again later" message instead of a generic
-        // credentials error on every attempt while it's locked.
-        if (user && user.locked_until && new Date(user.locked_until) > new Date()) {
-            const minutesLeft = Math.ceil((new Date(user.locked_until) - new Date()) / 60000);
+        // credentials error on every attempt while it's locked. The lockout
+        // is per (account, IP) — see db.js login_failures — so it only
+        // blocks whoever piled up the failures, not the account's owner.
+        const lockedUntil = user ? db.getLoginLockedUntil(user.id, req.ip) : null;
+        if (lockedUntil) {
+            const minutesLeft = Math.ceil((new Date(lockedUntil) - new Date()) / 60000);
             throw new AuthError(`Compte temporairement bloque suite a plusieurs echecs. Reessaie dans ${minutesLeft} minute(s).`);
         }
 
         if (!user || !db.verifyPassword(password, user.password_salt, user.password_hash)) {
-            if (user) db.registerFailedLogin(user.id);
+            if (user) db.registerFailedLogin(user.id, req.ip);
             throw new AuthError('Numero ou mot de passe incorrect');
         }
 
-        // Manual subscription model (no payment gateway — see config.js):
-        // every admin activation grants a fixed window from that moment.
-        // Checked before the plain is_active gate so a lapsed subscription
-        // gets a distinct "renew" message instead of the generic
-        // "not yet activated" one. If still marked active past its expiry
-        // (e.g. the admin hasn't looked at it), flip it off now so it
-        // doesn't linger as active until some other cron/action catches it.
-        if (user.subscription_expires_at && new Date(user.subscription_expires_at) < new Date()) {
-            if (user.is_active) db.setUserActiveById(user.id, false);
-            throw new AuthError('Ton abonnement a expire. Contacte l\'administrateur pour le renouveler.');
-        }
+        const accessError = accountAccessError(user);
+        if (accessError) throw new AuthError(accessError);
 
-        if (!user.is_active) {
-            throw new AuthError('Ce compte n\'a pas encore ete active. Contacte l\'administrateur.');
-        }
-
-        db.clearFailedLogins(user.id);
+        db.clearFailedLogins(user.id, req.ip);
         const { token, expires_at } = db.createSession(user.id);
         setSessionCookie(res, token, expires_at);
         const body = { id: user.id, name: user.name, phone: user.phone, is_admin: !!user.is_admin, subscription_expires_at: user.subscription_expires_at };
@@ -237,13 +255,8 @@ app.post('/api/auth/logout', (req, res) => {
     res.status(204).end();
 });
 
-app.get('/api/auth/me', (req, res) => {
-    const token = getTokenFromRequest(req);
-    if (!token) return res.status(401).json({ error: 'Non authentifie' });
-    const session = db.getSession(token);
-    if (!session) return res.status(401).json({ error: 'Session expiree' });
-    const user = db.getUserById(session.user_id);
-    res.json(user);
+app.get('/api/auth/me', requireAuth, (req, res) => {
+    res.json(req.user);
 });
 
 // ---------- ADMIN (all require auth + is_admin) ----------

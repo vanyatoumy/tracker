@@ -56,11 +56,13 @@ async function stopServer() {
 // Minimal cookie jar: tracks the session cookie across requests so tests
 // can exercise login -> authenticated request -> logout without manually
 // threading a Set-Cookie header through every call.
-function makeClient() {
+// extraHeaders: sent on every request — e.g. X-Forwarded-For to simulate
+// distinct client IPs in a test file that enables TRUST_PROXY.
+function makeClient(extraHeaders = {}) {
     let cookie = null;
 
     async function request(method, urlPath, body) {
-        const headers = { 'Content-Type': 'application/json' };
+        const headers = { 'Content-Type': 'application/json', ...extraHeaders };
         if (cookie) headers.Cookie = cookie;
 
         const res = await fetch(baseUrl + urlPath, {

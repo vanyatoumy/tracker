@@ -51,8 +51,9 @@ test('a locked account stays locked across separate connection attempts (not per
         await attacker.post('/api/auth/login', { phone, password: 'nope' });
     }
 
-    // A different client (fresh cookie jar) hitting the same account should
-    // also see the lockout — it's tied to the account, not a session.
+    // A different client (fresh cookie jar) hitting the same account from
+    // the same IP should also see the lockout — it's tied to the account +
+    // IP, not a session. (Other IPs stay unaffected: see lockout-ip.test.js.)
     const owner = makeClient();
     const res = await owner.post('/api/auth/login', { phone, password: PASSWORD });
     assert.equal(res.status, 401);

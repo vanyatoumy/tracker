@@ -27,12 +27,16 @@ const OfflineSync = (() => {
   const DB_NAME = 'suivi-prospection-offline';
   const DB_VERSION = 1;
   const TEMP_ID_PREFIX = 'offline-';
+  const ID_MAP_PREFIX = 'idmap:'; // meta key prefix: tempId -> server id, see syncPendingChanges
 
   const enabled = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 
   let dbPromise = null;
   let syncing = false;
   let isOnline = navigator.onLine !== false;
+  // Set when a sync attempt got a 401: retrying with the same token is
+  // pointless, so syncing waits until a real login provides a new one.
+  let authBlocked = false;
 
   // Without this, Android/Chrome can treat this origin's IndexedDB data as
   // evictable under storage pressure or after the app's gone unused for a
@@ -127,6 +131,7 @@ const OfflineSync = (() => {
   async function setToken(token) {
     if (!enabled) return;
     authToken = token;
+    if (token) authBlocked = false;
     if (token) await put('meta', { key: 'authToken', value: token });
     else await del('meta', 'authToken');
   }
@@ -333,9 +338,13 @@ const OfflineSync = (() => {
 
   // ---------- queue ----------
 
+  // Each entry records which account made it, so a different account
+  // logging in on the same device never gets someone else's pending changes
+  // replayed into it (see syncPendingChanges).
   async function enqueue(entry) {
+    const user = await getCachedUser();
     const store = await tx('queue', 'readwrite');
-    return reqToPromise(store.add({ ...entry, createdAt: new Date().toISOString() }));
+    return reqToPromise(store.add({ ...entry, userId: user ? user.id : null, createdAt: new Date().toISOString() }));
   }
   async function queueLength() {
     const store = await tx('queue', 'readonly');
@@ -431,7 +440,7 @@ const OfflineSync = (() => {
   // ---------- sync engine ----------
 
   async function syncPendingChanges() {
-    if (!enabled || syncing) return;
+    if (!enabled || syncing || authBlocked) return;
     await readyPromise;
     syncing = true;
     try {
@@ -439,25 +448,49 @@ const OfflineSync = (() => {
       let entries = await reqToPromise(store.getAll());
       entries.sort((a, b) => a.queueId - b.queueId);
 
-      const tempIdMap = {}; // tempId -> real id, filled in as creates succeed
+      const me = await getCachedUser();
 
       for (const entry of entries) {
-        const resolvedId = entry.realId || tempIdMap[entry.tempId] || entry.tempId;
+        // Another account's change (logged out, someone else logged in):
+        // leave it queued for when its owner is back.
+        if (entry.userId && (!me || me.id !== entry.userId)) continue;
+
+        // The tempId -> real id mapping is persisted (not just held for this
+        // pass): if a pass stops right after a create went through, the
+        // edits queued behind it must still find the real id next time,
+        // instead of being sent to /api/prospects/offline-... and dropped.
+        const mappedId = entry.tempId ? await getMappedId(entry.tempId) : null;
+        if (entry.kind === 'create' && mappedId) {
+          // Created in an earlier pass that was cut off before this entry
+          // was removed — don't create the contact a second time.
+          await del('queue', entry.queueId);
+          continue;
+        }
+        const resolvedId = entry.realId || mappedId || entry.tempId;
         try {
-          const realId = await replayEntry(entry, resolvedId, tempIdMap);
-          if (entry.kind === 'create') tempIdMap[entry.tempId] = realId;
+          const realId = await replayEntry(entry, resolvedId);
+          if (entry.kind === 'create') await setMappedId(entry.tempId, realId);
           await del('queue', entry.queueId);
         } catch (err) {
-          if (err && err.isNetworkFailure) {
-            // Still offline (or connection dropped mid-sync) — stop here,
-            // leave this and every later entry queued for next attempt.
+          if (err && err.status === 401) {
+            // Session expired / account deactivated / subscription lapsed.
+            // The changes are fine, only the credentials aren't — keep the
+            // whole queue and wait for a real login (setToken) to resume.
+            authBlocked = true;
+            break;
+          }
+          if (isRetryable(err)) {
+            // Still offline, connection dropped mid-sync, or the server is
+            // temporarily unavailable — stop here, leave this and every
+            // later entry queued for next attempt.
             break;
           }
           // A genuine server rejection (bad payload, contact already
           // deleted server-side, etc.) can't be retried as-is. Drop it so
-          // it doesn't block everything behind it, and log it — there's no
-          // UI for surfacing individual failed changes yet.
+          // it doesn't block everything behind it, but keep a record the
+          // app shows to the user (see failedChanges).
           console.error('Dropping unsyncable offline change:', entry, err);
+          await recordFailure(entry, err);
           await del('queue', entry.queueId);
         }
       }
@@ -485,7 +518,38 @@ const OfflineSync = (() => {
     return res.status === 204 ? null : res.json();
   }
 
-  async function replayEntry(entry, resolvedId, tempIdMap) {
+  function isRetryable(err) {
+    if (!err) return false;
+    if (err.isNetworkFailure) return true;
+    return err.status === 408 || err.status === 429 || err.status >= 500;
+  }
+
+  async function getMappedId(tempId) {
+    const row = await getOne('meta', ID_MAP_PREFIX + tempId);
+    return row ? row.value : null;
+  }
+  async function setMappedId(tempId, realId) {
+    await put('meta', { key: ID_MAP_PREFIX + tempId, value: realId });
+  }
+
+  const MAX_RECORDED_FAILURES = 50;
+  async function recordFailure(entry, err) {
+    const row = await getOne('meta', 'syncFailures');
+    const list = row ? row.value : [];
+    list.push({ kind: entry.kind, payload: entry.payload, error: err.message, at: nowIso() });
+    await put('meta', { key: 'syncFailures', value: list.slice(-MAX_RECORDED_FAILURES) });
+  }
+  async function failedChanges() {
+    if (!enabled) return [];
+    const row = await getOne('meta', 'syncFailures');
+    return row ? row.value : [];
+  }
+  async function clearFailedChanges() {
+    if (!enabled) return;
+    await del('meta', 'syncFailures');
+  }
+
+  async function replayEntry(entry, resolvedId) {
     switch (entry.kind) {
       case 'create': {
         const created = await rawFetch('/api/prospects', { method: 'POST', body: JSON.stringify(entry.payload) });
@@ -581,8 +645,11 @@ const OfflineSync = (() => {
 
     isOnline = true;
     if (res.status === 401 && !isAuthAttempt) {
+      // Same reason passthrough as app.js's api(): deactivated account or
+      // lapsed subscription, not just an expired session.
+      const body = await res.json().catch(() => ({}));
       showAuth();
-      throw new Error('Session expiree, reconnecte-toi');
+      throw new Error(body.error || 'Session expiree, reconnecte-toi');
     }
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: 'Erreur inconnue' }));
@@ -714,6 +781,10 @@ const OfflineSync = (() => {
     clearSession,
     cacheLoginCredential,
     pendingCount,
-    get isOnline() { return isOnline; }
+    failedChanges,
+    clearFailedChanges,
+    syncPendingChanges,
+    get isOnline() { return isOnline; },
+    get authBlocked() { return authBlocked; }
   };
 })();

@@ -88,8 +88,11 @@ async function api(path, opts = {}) {
   // OTHER endpoint (which require an existing session to begin with).
   const isAuthAttempt = path === '/api/auth/login' || path === '/api/auth/register';
   if (res.status === 401 && !isAuthAttempt) {
+    // The server also answers 401 when the account was deactivated or its
+    // subscription lapsed mid-session — pass that reason through.
+    const body = await res.json().catch(() => ({}));
     showAuthScreen();
-    throw new Error('Session expiree, reconnecte-toi');
+    throw new Error(body.error || 'Session expiree, reconnecte-toi');
   }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: 'Erreur inconnue' }));
@@ -170,10 +173,15 @@ function toDatetimeLocalValue(iso) {
   const pad = n => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
+// Escapes for both element text and quoted attribute values — the
+// textContent/innerHTML round-trip this replaced left `"` and `'` as-is,
+// so a value inside href="..." could break out of the attribute.
+const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 function escapeHtml(str) {
-  const div = document.createElement('div');
-  div.textContent = str || '';
-  return div.innerHTML;
+  return String(str ?? '').replace(/[&<>"']/g, ch => HTML_ESCAPES[ch]);
+}
+function sourceLabel(source) {
+  return SOURCE_LABELS[source] || escapeHtml(source);
 }
 
 // ============================================
@@ -432,16 +440,33 @@ function startOfflineStatusIndicator() {
   const el = document.getElementById('offlineStatus');
   const tick = async () => {
     const pending = await OfflineSync.pendingCount();
+    const failed = (await OfflineSync.failedChanges()).length;
     const offline = !OfflineSync.isOnline;
-    if (!offline && pending === 0) {
+    if (!offline && pending === 0 && failed === 0) {
       el.classList.add('hidden');
       return;
     }
     el.classList.remove('hidden');
-    if (offline && pending > 0) el.innerHTML = `${icon('wifiOff')} Hors ligne · ${pending} en attente`;
+    if (failed > 0) el.innerHTML = `${icon('alarmClock')} ${failed} echec(s) de synchro · voir`;
+    else if (OfflineSync.authBlocked && pending > 0) el.innerHTML = `${icon('wifiOff')} Reconnecte-toi · ${pending} en attente`;
+    else if (offline && pending > 0) el.innerHTML = `${icon('wifiOff')} Hors ligne · ${pending} en attente`;
     else if (offline) el.innerHTML = `${icon('wifiOff')} Hors ligne`;
     else el.innerHTML = `${icon('refreshCw')} Synchronisation... ${pending} en attente`;
   };
+  // Changes the server rejected while replaying the offline queue (contact
+  // deleted elsewhere, invalid data...) — they can't be retried, but the
+  // user needs to know they didn't make it rather than losing them silently.
+  el.addEventListener('click', async () => {
+    const failures = await OfflineSync.failedChanges();
+    if (failures.length === 0) return;
+    const lines = failures.map(f => {
+      const who = f.payload && f.payload.name ? ` (${f.payload.name})` : '';
+      return `• ${new Date(f.at).toLocaleString('fr-FR')} — ${f.kind}${who} : ${f.error}`;
+    });
+    alert(`Ces modifications faites hors ligne ont ete refusees par le serveur et n'ont pas ete enregistrees :\n\n${lines.join('\n')}`);
+    await OfflineSync.clearFailedChanges();
+    tick();
+  });
   tick();
   offlineStatusInterval = setInterval(tick, 3000);
 }
@@ -600,18 +625,22 @@ function renderCard(p) {
   card.className = `card ${ageClass(p.stage_updated_at)}`;
   card.dataset.id = p.id;
 
+  // No inline onclick="event.stopPropagation()" on these links: the CSP
+  // (script-src 'self', see server.js) silently blocks inline handlers, so
+  // a click on the icon also opened the detail panel. The card's own click
+  // listener below skips clicks that land on a link instead.
   const wa = waLinkFromPhone(p.phone);
   const waLink = wa
-    ? `<a class="card-wa" href="${wa}" target="_blank" rel="noopener" title="Ouvrir WhatsApp" onclick="event.stopPropagation()">${icon('messageCircle')}</a>`
+    ? `<a class="card-wa" href="${escapeHtml(wa)}" target="_blank" rel="noopener" title="Ouvrir WhatsApp">${icon('messageCircle')}</a>`
     : '';
 
   const fbLink = (p.source === 'facebook' && p.facebook_profile_url)
-    ? `<a class="card-wa" href="${escapeHtml(p.facebook_profile_url)}" target="_blank" rel="noopener" title="Ouvrir le profil Facebook" onclick="event.stopPropagation()">${icon('globe')}</a>`
+    ? `<a class="card-wa" href="${escapeHtml(p.facebook_profile_url)}" target="_blank" rel="noopener" title="Ouvrir le profil Facebook">${icon('globe')}</a>`
     : '';
 
   const altWa = waLinkFromPhone(p.alt_phone);
   const altWaLink = altWa
-    ? `<a class="card-wa" href="${altWa}" target="_blank" rel="noopener" title="Numero secondaire — WhatsApp" onclick="event.stopPropagation()">${icon('messageCircle')}<sup>2</sup></a>`
+    ? `<a class="card-wa" href="${escapeHtml(altWa)}" target="_blank" rel="noopener" title="Numero secondaire — WhatsApp">${icon('messageCircle')}<sup>2</sup></a>`
     : '';
 
   let followupHtml = '';
@@ -628,14 +657,17 @@ function renderCard(p) {
       ${waLink}${altWaLink}${fbLink}
     </div>
     <div class="card-meta">
-      ${p.source ? `<span class="tag">${SOURCE_LABELS[p.source] || p.source}</span>` : ''}
+      ${p.source ? `<span class="tag">${sourceLabel(p.source)}</span>` : ''}
       ${p.interest_type && p.interest_type !== 'indecis' ? `<span class="tag">${p.interest_type === 'opportunite' ? 'Opportunite' : 'Produit'}</span>` : ''}
     </div>
     ${locationBits ? `<div class="card-meta"><span class="tag">${icon('mapPin')} ${escapeHtml(locationBits)}</span></div>` : ''}
     <div class="card-meta"><span>${relativeTime(p.stage_updated_at)}</span></div>
     ${followupHtml}
   `;
-  card.addEventListener('click', () => openDetail(p.id));
+  card.addEventListener('click', (e) => {
+    if (e.target.closest('a')) return;
+    openDetail(p.id);
+  });
   return card;
 }
 
@@ -725,10 +757,10 @@ async function loadReminders() {
   list.innerHTML = due.map(p => {
     const wa = waLinkFromPhone(p.phone) || waLinkFromPhone(p.alt_phone);
     return `
-      <button class="notif-item" data-wa="${wa || ''}" data-id="${p.id}">
+      <button class="notif-item" data-wa="${escapeHtml(wa)}" data-id="${escapeHtml(p.id)}">
         <span class="notif-item-main">
-          <span class="notif-item-name">${p.name}</span>
-          <span class="notif-item-phone">${p.phone || ''}</span>
+          <span class="notif-item-name">${escapeHtml(p.name)}</span>
+          <span class="notif-item-phone">${escapeHtml(p.phone)}</span>
         </span>
         <span class="notif-item-time">${formatDateTime(p.next_followup_at)}</span>
       </button>
@@ -757,7 +789,7 @@ async function loadStats() {
   document.querySelector('#sourceTable tbody').innerHTML = sources.length === 0
     ? `<tr><td colspan="4" style="color:var(--text-faint)">Aucune donnee pour le moment</td></tr>`
     : sources.map(s => `
-        <tr><td>${SOURCE_LABELS[s.source] || s.source}</td><td>${s.total}</td><td>${s.converted}</td><td>${s.conversion_rate}%</td></tr>
+        <tr><td>${sourceLabel(s.source)}</td><td>${s.total}</td><td>${s.converted}</td><td>${s.conversion_rate}%</td></tr>
       `).join('');
 
   const countries = await api('/api/stats/countries');
@@ -879,7 +911,7 @@ async function loadAdminUsers() {
   try {
     users = await api('/api/admin/users');
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="7">${err.message}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7">${escapeHtml(err.message)}</td></tr>`;
     return;
   }
 
@@ -888,8 +920,8 @@ async function loadAdminUsers() {
     const isLocked = u.locked_until && new Date(u.locked_until) > new Date();
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td>${u.name}${u.is_admin ? ` <span title="Administrateur">${icon('crown')}</span>` : ''}</td>
-      <td>${u.phone}</td>
+      <td>${escapeHtml(u.name)}${u.is_admin ? ` <span title="Administrateur">${icon('crown')}</span>` : ''}</td>
+      <td>${escapeHtml(u.phone)}</td>
       <td>${u.is_active ? 'Actif' : 'Inactif'}</td>
       <td>${subscriptionCellText(u.subscription_expires_at)}</td>
       <td>${isLocked ? `Verrouille jusqu'a ${new Date(u.locked_until).toLocaleString('fr-FR')}` : '—'}</td>
