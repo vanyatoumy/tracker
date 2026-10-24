@@ -58,25 +58,45 @@ data/                        Créé au runtime : tracker.db + backups/
 
 ## 3. Modèle de données
 
-Quatre tables (SQLite, fichier unique `data/tracker.db`) :
+SQLite, fichier unique `data/tracker.db`, en mode **WAL**
+(`journal_mode = WAL`, `busy_timeout = 5000`). En WAL, les écritures récentes
+peuvent rester dans `tracker.db-wal` jusqu'au prochain checkpoint : pour
+sauvegarder pendant que le serveur tourne, utiliser `npm run backup`
+(`VACUUM INTO`), pas une simple copie de `tracker.db`.
+
+Le schéma est créé par `CREATE TABLE IF NOT EXISTS` au démarrage ; les
+colonnes ajoutées depuis sont migrées automatiquement par des
+`ALTER TABLE ... ADD COLUMN` idempotents (`migrateUserColumns` /
+`migrateProspectColumns` dans [db.js](../db.js)).
 
 **`users`** — un compte par distributeur. `phone` (format E.164) sert
 d'identifiant de connexion, unique. Mot de passe : `password_hash` +
 `password_salt` via `scrypt` (module `crypto` natif, pas de dépendance
 externe type bcrypt). `is_active` (0 par défaut à l'inscription — activation
-manuelle requise), `is_admin`, `failed_login_attempts` / `locked_until`
-pour le verrouillage anti-brute-force.
+manuelle requise), `is_admin`, `subscription_expires_at`, `weekly_goal`
+(objectif d'actions par semaine, statistiques). Les colonnes historiques
+`failed_login_attempts` / `locked_until` ne sont plus lues (remplacées par
+`login_failures`).
+
+**`login_failures`** — échecs de connexion par couple (`user_id`, `ip`) :
+`attempts`, `locked_until`. Le verrouillage ne bloque que l'IP qui a
+accumulé les échecs, pas le propriétaire du compte.
 
 **`sessions`** — jetons de session, `ON DELETE CASCADE` sur `user_id`.
 Stockées en base (pas de store distribué type Redis) — suffisant pour un
-serveur unique.
+serveur unique. Les sessions expirées sont purgées à chaque connexion.
 
 **`prospects`** — état courant d'un contact. `owner_id` référence `users`
 (`ON DELETE CASCADE`). Champ `stage` contraint par un `CHECK` aux 7 valeurs
 du pipeline (`nouveau`, `contacte`, `prospect`, `interesse`, `en_decision`,
 `client`, `partenaire`). `interest_type` (`produit` / `opportunite` /
 `indecis`) distingue les deux issues finales possibles. `is_archived`
-plutôt qu'une suppression physique.
+plutôt qu'une suppression physique. Autres colonnes : `birthday`
+(`AAAA-MM-JJ`, 1904 = année inconnue), `temperature` (`froid` / `tiede` /
+`chaud`), `reorder_interval_days` (rappel de réachat), `client_ref` (clé
+d'idempotence des créations rejouées depuis la file hors ligne — index
+unique `(owner_id, client_ref)`). Les lectures ajoutent `last_purchase_at`
+(date du dernier achat, calculée).
 
 **`stage_history`** — journal append-only de toute transition d'étape.
 **Important** : le code applicatif n'écrit jamais directement
@@ -88,9 +108,19 @@ transition n'est jamais non journalisée, même par erreur de code futur.
 **`interactions`** — journal séparé des touches (appel/message/
 rencontre/note), un enregistrement par prospect et par événement.
 
+**`purchases`** — achats d'un client (`purchased_at`, `product`, `amount`,
+`note`), `ON DELETE CASCADE` sur `prospect_id`. Alimentent le rappel de
+réachat et le chiffre d'affaires des statistiques.
+
+**`message_templates`** — modèles de message WhatsApp par utilisateur
+(`name`, `body`). Les variables (`{prenom}`, `{nom}`, `{ville}`, `{moi}`)
+sont remplacées côté client ([planning.js](../public/planning.js)).
+
 Index sur `prospects(owner_id, stage, is_archived, next_followup_at,
-country)` et sur `stage_history(prospect_id, to_stage)` — dimensionnés pour
-les requêtes de filtrage et de stats du frontend.
+country)`, un index composite `prospects(owner_id, is_archived,
+stage_updated_at)` pour la liste principale, et `stage_history(prospect_id,
+to_stage)` — dimensionnés pour les requêtes de filtrage et de stats du
+frontend.
 
 ## 4. Authentification et autorisation
 
@@ -108,10 +138,14 @@ les requêtes de filtrage et de stats du frontend.
   `Authorization: Bearer <token>` sur chaque requête. Comme aucun cookie ne
   traverse la frontière, `Access-Control-Allow-Credentials` n'est pas
   nécessaire.
-- **Comptes inactifs** : le login échoue tant qu'un admin n'a pas activé
-  le compte (`users.is_active`).
-- **Verrouillage** : 4 échecs consécutifs -> `locked_until` = maintenant +
-  15 min. Un admin peut débloquer via `/api/admin/users/:id/unlock`.
+- **Comptes inactifs / abonnement** : le login échoue tant qu'un admin n'a
+  pas activé le compte (`users.is_active`) ou si `subscription_expires_at`
+  est dépassée. Ce contrôle est refait **à chaque requête** dans
+  `requireAuth` : une désactivation ou une expiration coupe aussi les
+  sessions déjà ouvertes (désactiver un compte supprime ses sessions).
+- **Verrouillage** : 4 échecs consécutifs depuis une même IP -> cette IP est
+  bloquée 15 min sur ce compte (`login_failures`). Les autres IP ne sont pas
+  affectées. Un admin peut tout débloquer via `/api/admin/users/:id/unlock`.
 - **Autorisation** : chaque route `/api/prospects*` filtre systématiquement
   par `owner_id = <utilisateur de la session>` — jamais de fuite
   inter-comptes (couvert par un test d'isolation dans `tests/`). Les routes

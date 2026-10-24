@@ -56,25 +56,44 @@ data/                        Created at runtime: tracker.db + backups/
 
 ## 3. Data model
 
-Four tables (SQLite, single file `data/tracker.db`):
+SQLite, single file `data/tracker.db`, in **WAL** mode
+(`journal_mode = WAL`, `busy_timeout = 5000`). With WAL, recent writes can
+sit in `tracker.db-wal` until the next checkpoint: to back up while the
+server runs, use `npm run backup` (`VACUUM INTO`), not a plain copy of
+`tracker.db`.
+
+The schema is created with `CREATE TABLE IF NOT EXISTS` at startup;
+columns added since are migrated automatically by idempotent
+`ALTER TABLE ... ADD COLUMN` calls (`migrateUserColumns` /
+`migrateProspectColumns` in [db.js](../db.js)).
 
 **`users`** — one account per distributor. `phone` (E.164 format) is the
 unique login identifier. Password: `password_hash` + `password_salt` via
 `scrypt` (Node's built-in `crypto` module, no external dependency like
 bcrypt). `is_active` (defaults to 0 at signup — requires manual
-activation), `is_admin`, `failed_login_attempts` / `locked_until` for
-brute-force lockout.
+activation), `is_admin`, `subscription_expires_at`, `weekly_goal` (actions
+per week, statistics). The legacy `failed_login_attempts` / `locked_until`
+columns are no longer read (superseded by `login_failures`).
+
+**`login_failures`** — failed logins per (`user_id`, `ip`) pair:
+`attempts`, `locked_until`. A lockout only blocks the IP that piled up the
+failures, not the account's owner.
 
 **`sessions`** — session tokens, `ON DELETE CASCADE` on `user_id`. Stored
 in the database (no distributed store like Redis) — sufficient for a
-single-server deployment.
+single-server deployment. Expired sessions are swept on every login.
 
 **`prospects`** — a contact's current state. `owner_id` references `users`
 (`ON DELETE CASCADE`). The `stage` column is constrained by a `CHECK` to
 the 7 pipeline values (`nouveau`, `contacte`, `prospect`, `interesse`,
 `en_decision`, `client`, `partenaire`). `interest_type` (`produit` /
 `opportunite` / `indecis`) distinguishes the two possible final outcomes.
-`is_archived` is used instead of physical deletion.
+`is_archived` is used instead of physical deletion. Other columns:
+`birthday` (`YYYY-MM-DD`, 1904 = unknown year), `temperature` (`froid` /
+`tiede` / `chaud`), `reorder_interval_days` (reorder reminder),
+`client_ref` (idempotency key for creates replayed from the offline queue —
+unique index on `(owner_id, client_ref)`). Reads add a computed
+`last_purchase_at`.
 
 **`stage_history`** — an append-only log of every stage transition.
 **Important**: application code never writes `prospects.stage` directly.
@@ -86,9 +105,18 @@ unlogged, even by a future code mistake.
 **`interactions`** — a separate log of touchpoints (call/message/
 meeting/note), one row per prospect per event.
 
+**`purchases`** — a client's orders (`purchased_at`, `product`, `amount`,
+`note`), `ON DELETE CASCADE` on `prospect_id`. Drive the reorder reminder
+and the revenue figure in the statistics.
+
+**`message_templates`** — per-user WhatsApp message templates (`name`,
+`body`). Variables (`{prenom}`, `{nom}`, `{ville}`, `{moi}`) are filled in
+client-side ([planning.js](../public/planning.js)).
+
 Indexes on `prospects(owner_id, stage, is_archived, next_followup_at,
-country)` and on `stage_history(prospect_id, to_stage)` — sized for the
-frontend's filtering and stats queries.
+country)`, a composite `prospects(owner_id, is_archived,
+stage_updated_at)` for the main list, and `stage_history(prospect_id,
+to_stage)` — sized for the frontend's filtering and stats queries.
 
 ## 4. Authentication and authorization
 
@@ -104,10 +132,14 @@ frontend's filtering and stats queries.
   response's JSON body. The mobile client then sends it back as
   `Authorization: Bearer <token>` on every request. Since no cookie
   crosses the boundary, `Access-Control-Allow-Credentials` isn't needed.
-- **Inactive accounts**: login fails until an admin activates the account
-  (`users.is_active`).
-- **Lockout**: 4 consecutive failures -> `locked_until` = now + 15 min. An
-  admin can unlock via `/api/admin/users/:id/unlock`.
+- **Inactive accounts / subscription**: login fails until an admin
+  activates the account (`users.is_active`) or once
+  `subscription_expires_at` has passed. This check runs again **on every
+  request** in `requireAuth`: deactivation or expiry also cuts off sessions
+  that are already open (deactivating an account deletes its sessions).
+- **Lockout**: 4 consecutive failures from one IP -> that IP is locked out
+  of that account for 15 min (`login_failures`). Other IPs are unaffected.
+  An admin can lift every lockout via `/api/admin/users/:id/unlock`.
 - **Authorization**: every `/api/prospects*` route consistently filters by
   `owner_id = <session's user>` — no cross-account leakage (covered by an
   isolation test in `tests/`). `/api/admin/*` routes additionally require
