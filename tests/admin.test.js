@@ -153,3 +153,26 @@ test('reset-password rejects a too-short password', async () => {
     const res = await admin.post(`/api/admin/users/${target.id}/reset-password`, { new_password: '123' });
     assert.equal(res.status, 400);
 });
+
+test('an admin can record a renewal reminder; it shows in the admin list; non-admins cannot', async () => {
+    const adminPhone = '+237600333020';
+    db.createUser({ name: 'AdminR', phone: adminPhone, password: PASSWORD });
+    db.setUserActive(adminPhone, true);
+    db.setUserAdmin(adminPhone, true);
+    const targetPhone = '+237600333021';
+    const target = db.createUser({ name: 'Expiring', phone: targetPhone, password: PASSWORD });
+    db.setUserActive(targetPhone, true);
+
+    const admin = await loginAs(adminPhone);
+    const before = (await admin.get('/api/admin/users')).body.find(u => u.id === target.id);
+    assert.equal(before.renewal_reminded_at, null);
+
+    const res = await admin.post(`/api/admin/users/${target.id}/renewal-reminded`);
+    assert.equal(res.status, 200);
+    const after = (await admin.get('/api/admin/users')).body.find(u => u.id === target.id);
+    assert.ok(after.renewal_reminded_at && !Number.isNaN(Date.parse(after.renewal_reminded_at)));
+
+    assert.equal((await admin.post('/api/admin/users/does-not-exist/renewal-reminded')).status, 404);
+    const regular = await loginAs(targetPhone);
+    assert.equal((await regular.post(`/api/admin/users/${target.id}/renewal-reminded`)).status, 403);
+});

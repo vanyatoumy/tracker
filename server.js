@@ -296,6 +296,12 @@ app.post('/api/admin/users/:id/unlock', requireAuth, requireAdmin, (req, res) =>
     } catch (err) { handleError(res, err); }
 });
 
+app.post('/api/admin/users/:id/renewal-reminded', requireAuth, requireAdmin, (req, res) => {
+    try {
+        res.json(db.markRenewalReminded(req.params.id));
+    } catch (err) { handleError(res, err); }
+});
+
 // Admin-assisted password reset: replaces "ask the operator to run
 // scripts/reset-password.js on the server" for the common case. The admin
 // picks the new password and tells the user out-of-band (call, WhatsApp,

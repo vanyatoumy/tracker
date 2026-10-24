@@ -249,7 +249,22 @@ Fais glisser vers le bas en haut du pipeline pour forcer un rafraîchissement
 ## 13. Espace Admin (comptes administrateurs uniquement)
 
 Onglet **"Admin"**, visible seulement si ton compte a les droits
-administrateur :
+administrateur.
+
+**Renouvellements** (en haut) : compteurs (comptes actifs, abonnements qui
+expirent sous 7 jours, expirés depuis moins de 30 jours, inscrits sans
+paiement) et trois listes à traiter :
+
+- **Expirent bientôt** et **Expirés récemment** : bouton **"Relancer"** qui
+  ouvre WhatsApp avec un message prêt (date d'expiration, prix et
+  instructions de paiement configurés dans `.env`).
+- **Inscrits, en attente de paiement** (inscrits ces 30 derniers jours,
+  jamais activés) : bouton **"Envoyer les instructions"**.
+- Chaque relance est notée ("Relancé il y a 2 jours") pour ne pas relancer
+  deux fois la même personne par erreur.
+- **"Renouveler"** / **"Activer"** démarre une nouvelle période d'abonnement.
+
+**Comptes utilisateurs** (en dessous) :
 
 - Liste de tous les comptes du système, avec l'état de leur abonnement.
 - **Activer / Renouveler** un compte (démarre une nouvelle période

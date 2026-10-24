@@ -184,6 +184,10 @@ END;
     if (!cols.includes('subscription_expires_at')) {
         db.exec(`ALTER TABLE users ADD COLUMN subscription_expires_at TEXT;`);
     }
+    if (!cols.includes('renewal_reminded_at')) {
+        // When an admin last sent this user a renewal reminder (admin view).
+        db.exec(`ALTER TABLE users ADD COLUMN renewal_reminded_at TEXT;`);
+    }
     if (!cols.includes('weekly_goal')) {
         // Target number of actions (messages, calls, meetings) per week; NULL = no goal set.
         db.exec(`ALTER TABLE users ADD COLUMN weekly_goal INTEGER;`);
@@ -284,11 +288,21 @@ function listAllUsers() {
 // locked out of this account somewhere".
 function adminListUsers() {
     return db.prepare(`
-        SELECT id, name, phone, is_active, is_admin, subscription_expires_at, created_at,
+        SELECT id, name, phone, is_active, is_admin, subscription_expires_at, renewal_reminded_at, created_at,
             (SELECT COALESCE(SUM(attempts), 0) FROM login_failures lf WHERE lf.user_id = users.id) AS failed_login_attempts,
             (SELECT MAX(locked_until) FROM login_failures lf WHERE lf.user_id = users.id AND lf.locked_until > ?) AS locked_until
         FROM users ORDER BY created_at ASC
     `).all(now());
+}
+
+// The admin sent this user a renewal reminder (WhatsApp, opened from the
+// admin view) — recorded so the same person isn't chased twice by mistake.
+function markRenewalReminded(userId) {
+    const user = db.prepare(`SELECT id FROM users WHERE id = ?`).get(userId);
+    if (!user) throw new NotFoundError('Compte introuvable');
+    const ts = now();
+    db.prepare(`UPDATE users SET renewal_reminded_at = ? WHERE id = ?`).run(ts, userId);
+    return { id: userId, renewal_reminded_at: ts };
 }
 
 // Admin-only: reset a user's password directly (used by scripts/reset-password.js,
@@ -1036,6 +1050,7 @@ module.exports = {
     getUserById,
     listAllUsers,
     adminListUsers,
+    markRenewalReminded,
     resetPasswordByPhone,
     setUserAdmin,
     setUserActive,

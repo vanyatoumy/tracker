@@ -114,3 +114,50 @@ test('birthdays: listed first (any stage), month and day only, 29 Feb wished on 
     assert.equal(Planning.isBirthdayToday('', NOW), false);
     assert.equal(Planning.isBirthdayToday(null, NOW), false);
 });
+
+test('renewalGroups: expiring within 7 days (soonest first) and expired within 30 days (most recent first)', () => {
+    const at = (days) => new Date(NOW.getTime() + days * 24 * 60 * 60 * 1000).toISOString();
+    const users = [
+        { id: 'in2', subscription_expires_at: at(2) },
+        { id: 'in6', subscription_expires_at: at(6.5) },
+        { id: 'in10', subscription_expires_at: at(10) },
+        { id: 'ago1', subscription_expires_at: at(-1) },
+        { id: 'ago20', subscription_expires_at: at(-20) },
+        { id: 'ago40', subscription_expires_at: at(-40) },
+        { id: 'never', subscription_expires_at: null }
+    ];
+    const g = Planning.renewalGroups([...users].reverse(), NOW);
+    assert.deepEqual(g.soon.map(x => x.user.id), ['in2', 'in6']);
+    assert.deepEqual(g.soon.map(x => x.days), [2, 7]);
+    assert.deepEqual(g.expired.map(x => x.user.id), ['ago1', 'ago20']);
+    assert.deepEqual(g.expired.map(x => x.days), [1, 20]);
+});
+
+test('renewalMessage: wording for upcoming vs past expiry, price and instructions when set', () => {
+    const upcoming = Planning.renewalMessage(
+        { name: 'Awa Bello', subscription_expires_at: new Date(2026, 9, 25, 12).toISOString() },
+        { price: '2000 FCFA / mois', instructions: 'Orange Money au 6XX' }, NOW);
+    assert.match(upcoming, /^Bonjour Awa, ton abonnement Suivi Prospection expire le 25 octobre\./);
+    assert.match(upcoming, /Tarif : 2000 FCFA \/ mois\./);
+    assert.match(upcoming, /Orange Money au 6XX/);
+
+    const past = Planning.renewalMessage({ name: 'Paul', subscription_expires_at: new Date(2026, 9, 1, 12).toISOString() }, {}, NOW);
+    assert.match(past, /a expire le 1 octobre\./);
+    assert.doesNotMatch(past, /Tarif/);
+});
+
+test('pendingActivations: never-activated sign-ups from the last 30 days, newest first; activationMessage', () => {
+    const created = (daysAgoN) => new Date(NOW.getTime() - daysAgoN * 24 * 60 * 60 * 1000).toISOString();
+    const users = [
+        { id: 'new', is_active: 0, subscription_expires_at: null, created_at: created(1) },
+        { id: 'older', is_active: 0, subscription_expires_at: null, created_at: created(12) },
+        { id: 'stale', is_active: 0, subscription_expires_at: null, created_at: created(45) },
+        { id: 'lapsed', is_active: 0, subscription_expires_at: created(3), created_at: created(40) },
+        { id: 'active', is_active: 1, subscription_expires_at: null, created_at: created(2) }
+    ];
+    assert.deepEqual(Planning.pendingActivations(users, NOW).map(x => x.user.id), ['new', 'older']);
+
+    const msg = Planning.activationMessage({ name: 'Nina Kamga' }, { price: '2000 FCFA / mois' });
+    assert.match(msg, /^Bonjour Nina, merci pour ton inscription/);
+    assert.match(msg, /Tarif : 2000 FCFA \/ mois\./);
+});

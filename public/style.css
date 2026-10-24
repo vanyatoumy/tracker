@@ -997,6 +997,24 @@ textarea { resize: vertical; min-height: 64px; }
 .timeline-time { color: var(--text-faint); font-size: 11px; }
 .timeline-note { color: var(--text-muted); margin-top: 2px; }
 
+/* ---------- ADMIN: renewals ---------- */
+.renewal-summary { margin-bottom: 18px; }
+.renewal-summary .stat-value { font-size: 26px; }
+.renewal-lists { display: flex; flex-direction: column; gap: 20px; max-width: 900px; }
+.renewal-item {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px 12px; display: flex; align-items: center; gap: 12px;
+}
+.renewal-soon { border-left: 3px solid #c98a2a; }
+.renewal-expired { border-left: 3px solid var(--red); }
+.renewal-pending { border-left: 3px solid #4a8fd8; }
+.renewal-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.renewal-name { font-weight: 700; font-size: 13.5px; }
+.renewal-detail { color: var(--text-faint); font-size: 12px; }
+.renewal-actions { display: flex; gap: 8px; flex: 0 0 auto; }
+.renewal-actions .btn-ghost { padding: 8px 12px; font-size: 12px; }
+.tag.reminded { border-color: #1f7a3d; color: var(--green); margin-left: 4px; }
+
 /* ---------- STATS: period, activity, goal, funnel ---------- */
 .period-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 18px; }
 .period-chips button {
@@ -1249,6 +1267,12 @@ button.btn-whatsapp { border: none; cursor: pointer; font-family: inherit; displ
   .btn-whatsapp .btn-label { display: none; }
   .btn-whatsapp { padding: 9px 10px; }
   .today-item { padding: 10px; gap: 8px; }
+  .renewal-item { flex-wrap: wrap; }
+  .renewal-actions { width: 100%; }
+  .renewal-actions > * { flex: 1; justify-content: center; }
+  /* Full-width button here: keep its label (the generic phone rule above
+     reduces WhatsApp buttons to the icon). */
+  .renewal-actions .btn-whatsapp .btn-label { display: inline; }
   .bulk-bar { bottom: 8px; padding: 10px; gap: 8px; }
   /* Counter + "Terminer" on the first line, the actions as a full-width
      2-column grid below. */

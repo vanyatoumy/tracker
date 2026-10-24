@@ -105,6 +105,71 @@ const Planning = (() => {
     return sections;
   }
 
+  // ---------- subscription renewals (admin view) ----------
+
+  // Accounts to chase for renewal:
+  //   soon    — expiring within the next `soonDays` days (soonest first)
+  //   expired — expired within the last `expiredDays` days (most recent
+  //             first); older than that, the person has most likely moved
+  //             on and the list would only grow.
+  function renewalGroups(users, now = new Date(), { soonDays = 7, expiredDays = 30 } = {}) {
+    const soonLimit = new Date(now.getTime() + soonDays * DAY_MS);
+    const expiredLimit = new Date(now.getTime() - expiredDays * DAY_MS);
+    const soon = [];
+    const expired = [];
+    for (const u of users) {
+      if (!u.subscription_expires_at) continue;
+      const at = new Date(u.subscription_expires_at);
+      if (at >= now && at < soonLimit) soon.push({ user: u, at, days: Math.ceil((at - now) / DAY_MS) });
+      else if (at < now && at >= expiredLimit) expired.push({ user: u, at, days: Math.floor((now - at) / DAY_MS) });
+    }
+    soon.sort((a, b) => a.at - b.at);
+    expired.sort((a, b) => b.at - a.at);
+    return { soon, expired };
+  }
+
+  // Signed up, never activated (no subscription yet), recently: people who
+  // took the first step but haven't paid — newest first.
+  function pendingActivations(users, now = new Date(), { withinDays = 30 } = {}) {
+    const limit = new Date(now.getTime() - withinDays * DAY_MS);
+    return users
+      .filter(u => !u.is_active && !u.subscription_expires_at && new Date(u.created_at) >= limit)
+      .map(u => ({ user: u, days: Math.floor((now - new Date(u.created_at)) / DAY_MS) }))
+      .sort((a, b) => a.days - b.days);
+  }
+
+  function activationMessage(user, info = {}) {
+    const first = (user.name || '').trim().split(/\s+/)[0] || '';
+    const lines = [
+      `Bonjour ${first}, merci pour ton inscription sur Suivi Prospection !`,
+      'Pour activer ton compte, il reste a regler l\'abonnement.'
+    ];
+    if (info.price) lines.push(`Tarif : ${info.price}.`);
+    if (info.instructions) lines.push(info.instructions);
+    lines.push('Des reception, j\'active ton acces.');
+    return lines.join('\n');
+  }
+
+  // WhatsApp text the admin sends to remind someone to renew. info is
+  // /api/subscription/info (price, instructions — any may be blank).
+  function renewalMessage(user, info = {}, now = new Date()) {
+    const first = (user.name || '').trim().split(/\s+/)[0] || '';
+    const at = new Date(user.subscription_expires_at);
+    const date = at.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' });
+    const lines = [
+      at < now
+        ? `Bonjour ${first}, ton abonnement Suivi Prospection a expire le ${date}.`
+        : `Bonjour ${first}, ton abonnement Suivi Prospection expire le ${date}.`,
+      at < now
+        ? 'Pour retrouver ton acces et tous tes contacts, il suffit de le renouveler.'
+        : 'Pour continuer sans interruption, pense a le renouveler.'
+    ];
+    if (info.price) lines.push(`Tarif : ${info.price}.`);
+    if (info.instructions) lines.push(info.instructions);
+    lines.push('Merci et bonne prospection !');
+    return lines.join('\n');
+  }
+
   // ---------- message templates ----------
 
   const TEMPLATE_VARIABLES = {
@@ -135,6 +200,10 @@ const Planning = (() => {
     buildToday,
     isBirthdayToday,
     reorderDueAt,
+    renewalGroups,
+    renewalMessage,
+    pendingActivations,
+    activationMessage,
     fillTemplate,
     whatsappLink,
     TEMPLATE_VARIABLE_NAMES: Object.keys(TEMPLATE_VARIABLES)

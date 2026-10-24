@@ -234,7 +234,13 @@
 
   <!-- ADMIN VIEW (only shown to admin accounts) -->
   <section id="adminView" class="view hidden">
-    <h2 class="section-title">Comptes utilisateurs</h2>
+    <!-- Filled by renderRenewals() (app.js), rules in planning.js -->
+    <h2 class="section-title">Renouvellements</h2>
+    <p class="section-hint">Les abonnements a relancer : qui expire bientot, qui vient d'expirer, qui s'est inscrit sans payer.</p>
+    <div id="renewalSummary" class="stats-grid renewal-summary"></div>
+    <div id="renewalLists" class="renewal-lists"></div>
+
+    <h2 class="section-title" style="margin-top:28px;">Comptes utilisateurs</h2>
     <p class="section-hint">Active les nouveaux comptes, debloque les comptes verrouilles apres des echecs de connexion repetes.</p>
     <div class="table-wrap">
       <table id="adminUsersTable">

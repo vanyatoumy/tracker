@@ -241,7 +241,24 @@ Pull down at the top of the pipeline to force a refresh
 
 ## 13. Admin area (admin accounts only)
 
-**"Admin"** tab, visible only if your account has admin rights:
+**"Admin"** tab, visible only if your account has admin rights.
+
+**Renouvellements** (Renewals, at the top): counters (active accounts,
+subscriptions expiring within 7 days, expired within the last 30 days,
+sign-ups not yet paid) and three lists to work through:
+
+- **Expirent bientôt** (Expiring soon) and **Expirés récemment** (Recently
+  expired): a **"Relancer"** (Remind) button opens WhatsApp with a ready
+  message (expiry date, price and payment instructions set in `.env`).
+- **Inscrits, en attente de paiement** (Signed up, awaiting payment — last
+  30 days, never activated): **"Envoyer les instructions"** (Send
+  instructions) button.
+- Each reminder is recorded ("Relancé il y a 2 jours" — reminded 2 days
+  ago) so the same person isn't chased twice by mistake.
+- **"Renouveler"** / **"Activer"** (Renew / Activate) starts a new
+  subscription period.
+
+**Comptes utilisateurs** (User accounts, below):
 
 - List of every account in the system, with its subscription status.
 - **Activate / Renew** an account (starts a new subscription period) or
