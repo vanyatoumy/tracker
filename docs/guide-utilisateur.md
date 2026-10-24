@@ -193,6 +193,12 @@ haut de l'app indique les relances dues (avec badge de comptage), et la vue
 Aujourd'hui les classe. Sur l'app mobile, une **notification locale** est
 programmée automatiquement à l'heure de la relance.
 
+**Résumé du matin** (app mobile) : chaque jour à 8h, une notification
+résume ta journée ("Aujourd'hui : 3 relances, 1 anniversaire, 2 réachats à
+proposer"), calculée comme la vue Aujourd'hui, même sans réseau. Rien à
+signaler = pas de notification. Activable / désactivable dans le menu
+**"⋮" → "Résumé du matin (8h)"**.
+
 ## 9. Statistiques
 
 Onglet **"Statistiques"**, avec une période au choix (7 jours, 30 jours,

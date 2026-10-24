@@ -105,6 +105,22 @@ const Planning = (() => {
     return sections;
   }
 
+  // ---------- morning summary (mobile notification) ----------
+
+  // One line for the 8am notification, from the same rules as the Today
+  // view evaluated at that moment; null when there's nothing worth a ping.
+  function morningSummaryText(prospects, at) {
+    const s = buildToday(prospects, at);
+    const parts = [];
+    const followups = s.overdue.length + s.today.length;
+    const plural = (n, one, many) => `${n} ${n > 1 ? many : one}`;
+    if (followups) parts.push(plural(followups, 'relance', 'relances'));
+    if (s.birthdays.length) parts.push(plural(s.birthdays.length, 'anniversaire', 'anniversaires'));
+    if (s.reorders.length) parts.push(plural(s.reorders.length, 'reachat a proposer', 'reachats a proposer'));
+    if (s.cold.length) parts.push(plural(s.cold.length, 'contact qui refroidit', 'contacts qui refroidissent'));
+    return parts.length ? `Aujourd'hui : ${parts.join(', ')}.` : null;
+  }
+
   // ---------- subscription renewals (admin view) ----------
 
   // Accounts to chase for renewal:
@@ -200,6 +216,7 @@ const Planning = (() => {
     buildToday,
     isBirthdayToday,
     reorderDueAt,
+    morningSummaryText,
     renewalGroups,
     renewalMessage,
     pendingActivations,

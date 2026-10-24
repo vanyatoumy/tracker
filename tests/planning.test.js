@@ -161,3 +161,16 @@ test('pendingActivations: never-activated sign-ups from the last 30 days, newest
     assert.match(msg, /^Bonjour Nina, merci pour ton inscription/);
     assert.match(msg, /Tarif : 2000 FCFA \/ mois\./);
 });
+
+test('morningSummaryText: counts what the Today view will show at that moment, null when nothing', () => {
+    const tomorrow8 = new Date(2026, 9, 22, 8, 0, 0);
+    const list = [
+        prospect({ next_followup_at: daysAgo(1) }),                         // overdue by tomorrow
+        prospect({ next_followup_at: daysAhead(1, 15) }),                   // due tomorrow afternoon
+        prospect({ birthday: '1990-10-22' }),                               // birthday tomorrow
+        prospect({ stage: 'client', reorder_interval_days: 30, last_purchase_at: daysAgo(40) })
+    ];
+    assert.equal(Planning.morningSummaryText(list, tomorrow8),
+        "Aujourd'hui : 2 relances, 1 anniversaire, 1 reachat a proposer.");
+    assert.equal(Planning.morningSummaryText([prospect({})], tomorrow8), null, 'only a never-contacted contact: no ping');
+});

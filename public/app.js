@@ -383,6 +383,51 @@ async function syncFollowupNotification(prospect) {
   }
 }
 
+// ---------- Morning summary (mobile only) ----------
+// A local notification at 8am ("Aujourd'hui : 3 relances, 1 anniversaire")
+// computed with the Today view's rules (Planning.morningSummaryText).
+// Notifications are fixed once scheduled, so it's recomputed and
+// rescheduled on every refresh — the text matches the latest data the app
+// has seen, and it works offline. Id 1 can't collide with the per-contact
+// follow-up ids in practice (31-bit hashes of UUIDs).
+const MORNING_NOTIF_ID = 1;
+const MORNING_HOUR = 8;
+
+function morningSummaryEnabled() {
+  try { return localStorage.getItem('morningSummaryOff') !== '1'; } catch { return true; }
+}
+
+async function syncMorningSummary(prospects) {
+  if (!isNativeApp()) return;
+  const { LocalNotifications } = window.Capacitor.Plugins;
+  try {
+    await LocalNotifications.cancel({ notifications: [{ id: MORNING_NOTIF_ID }] });
+    if (!morningSummaryEnabled()) return;
+    const at = new Date();
+    if (at.getHours() >= MORNING_HOUR) at.setDate(at.getDate() + 1);
+    at.setHours(MORNING_HOUR, 0, 0, 0);
+    const body = Planning.morningSummaryText(prospects, at);
+    if (!body) return;
+    await LocalNotifications.schedule({
+      notifications: [{ id: MORNING_NOTIF_ID, title: 'Ta journee de prospection', body, schedule: { at }, extra: { view: 'today' } }]
+    });
+  } catch (err) {
+    console.error('Failed to schedule the morning summary:', err);
+  }
+}
+
+function renderMorningToggle() {
+  const btn = document.getElementById('morningToggleBtn');
+  btn.classList.toggle('hidden', !isNativeApp());
+  btn.textContent = `Resume du matin (8h) : ${morningSummaryEnabled() ? 'active' : 'desactive'}`;
+}
+
+document.getElementById('morningToggleBtn').addEventListener('click', async () => {
+  try { localStorage.setItem('morningSummaryOff', morningSummaryEnabled() ? '1' : '0'); } catch { /* ignore */ }
+  renderMorningToggle();
+  if (!Object.values(activeFilters).some(Boolean)) await syncMorningSummary(currentProspects);
+});
+
 async function cancelFollowupNotification(prospectId) {
   if (!isNativeApp()) return;
   try {
@@ -431,6 +476,11 @@ async function savePhoneContact(prospect) {
 let pendingNotificationProspectId = null;
 if (isNativeApp()) {
   window.Capacitor.Plugins.LocalNotifications.addListener('localNotificationActionPerformed', (event) => {
+    // Morning summary: just land on the Today view (the default anyway).
+    if (event?.notification?.extra?.view === 'today') {
+      if (currentUser) document.querySelector('[data-view="today"]')?.click();
+      return;
+    }
     const prospectId = event?.notification?.extra?.prospectId;
     if (!prospectId) return;
     if (currentUser) openDetail(prospectId);
@@ -607,6 +657,7 @@ async function bootApp() {
   }
   document.getElementById('adminTabBtn').classList.toggle('hidden', !currentUser?.is_admin);
   renderGraceBanner();
+  renderMorningToggle();
   populateDialSelects();
   populateCountrySelects();
   populateFilterOptions();
@@ -1218,6 +1269,8 @@ async function loadArchived() {
 async function refreshAll() {
   await loadProspects();
   await loadReminders();
+  // A filtered list isn't the whole picture — keep the last full schedule.
+  if (!Object.values(activeFilters).some(Boolean)) syncMorningSummary(currentProspects);
   const activeView = document.querySelector('.tab-btn.active').dataset.view;
   if (activeView === 'today') await loadToday();
   if (activeView === 'stats') await loadStats();

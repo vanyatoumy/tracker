@@ -187,6 +187,11 @@ shows due follow-ups (with a count badge), and the Today view sorts them.
 On the mobile app, a **local notification** is scheduled automatically for
 the follow-up time.
 
+**Morning summary** (mobile app): every day at 8am, a notification sums up
+your day ("Aujourd'hui : 3 relances, 1 anniversaire…"), computed like the
+Today view, even offline. Nothing to report = no notification. Toggle it
+in **"⋮" → "Résumé du matin (8h)"**.
+
 ## 9. Statistics ("Statistiques" tab)
 
 With a period of your choice (7 days, 30 days, 90 days or all history):
