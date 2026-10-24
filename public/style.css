@@ -8,6 +8,7 @@
   --text: #F5F5F5;
   --text-muted: #9A9A9A;
   --text-faint: #616161;
+  --green: #34c26b;
   --font-display: 'Montserrat Alternates', 'Montserrat', sans-serif;
   --font-body: 'Montserrat', sans-serif;
 }
@@ -46,7 +47,35 @@ button, input, select, textarea { font-family: inherit; }
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 48px;
   padding: 20px;
+}
+
+/* Sign-up pitch beside the login card; under it on phones, where returning
+   users just want to log in. */
+.auth-pitch { max-width: 440px; }
+.auth-pitch h2 { font-family: var(--font-display); font-size: 26px; line-height: 1.25; margin: 0 0 8px; }
+.auth-pitch-sub { color: var(--text-muted); margin: 0 0 22px; font-size: 14px; }
+.auth-benefits { list-style: none; padding: 0; margin: 0 0 22px; display: flex; flex-direction: column; gap: 12px; }
+.auth-benefits li {
+  position: relative; padding-left: 26px; color: var(--text-muted); font-size: 13.5px; line-height: 1.45;
+}
+.auth-benefits li::before {
+  content: ''; position: absolute; left: 0; top: 3px; width: 14px; height: 14px; border-radius: 50%;
+  background: var(--red); box-shadow: 0 0 0 3px #2a1010;
+}
+.auth-benefits strong { color: var(--text); }
+.auth-price {
+  background: var(--surface); border: 1px solid var(--red-deep); border-radius: 10px;
+  padding: 12px 16px; margin-bottom: 18px; font-size: 13px; color: var(--text-muted);
+}
+.auth-price strong { display: block; font-family: var(--font-display); font-size: 20px; color: var(--text); }
+.auth-steps { margin: 0; padding-left: 18px; color: var(--text-faint); font-size: 12.5px; display: flex; flex-direction: column; gap: 4px; }
+
+@media (max-width: 900px) {
+  .auth-screen { flex-direction: column-reverse; justify-content: flex-start; gap: 28px; padding: 24px 16px 40px; }
+  .auth-card { margin-top: 8px; }
+  .auth-pitch h2 { font-size: 21px; }
 }
 
 .auth-card {
@@ -464,10 +493,14 @@ main { padding: 24px 28px 60px; }
 .view.hidden { display: none; }
 
 /* ---------- BOARD ---------- */
+/* 170px minimum per column: all 7 still fit side by side on a laptop with
+   Windows display scaling at 125% (1536 CSS px wide), where the old 210px
+   minimum pushed the "Partenaire" column off screen. Narrower than ~1300px
+   the board scrolls sideways; under 900px the mobile stage tabs take over. */
 .board {
   display: grid;
-  grid-template-columns: repeat(7, minmax(210px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(7, minmax(170px, 1fr));
+  gap: 10px;
   align-items: start;
   overflow-x: auto;
 }
@@ -531,6 +564,44 @@ main { padding: 24px 28px 60px; }
   overflow: hidden;
 }
 .progress-rail-fill { height: 100%; background: linear-gradient(90deg, var(--red), var(--red-deep)); }
+.column-won .progress-rail-fill { background: linear-gradient(90deg, #1f7a3d, var(--green)); }
+.column-won .column-title-text { color: var(--green); }
+
+/* Mobile stage tabs (renderStageTabs) — hidden on desktop, see @media below */
+.stage-tabs { display: none; }
+.stage-tab {
+  flex: 0 0 auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  padding: 8px 12px;
+  border-radius: 18px;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.stage-tab-count {
+  background: var(--surface-2); color: var(--text); border-radius: 10px;
+  padding: 0 7px; font-size: 11px;
+}
+.stage-tab.active { border-color: var(--red); color: var(--text); background: #2a1010; }
+.stage-tab.won.active { border-color: var(--green); background: #0f2416; }
+
+/* Dark scrollbars (the board's horizontal one was a glaring white bar).
+   Chrome/Edge 121+ drop all ::-webkit-scrollbar styling as soon as
+   `scrollbar-color` is set, falling back to the bulky classic Windows bar
+   with arrow buttons — so `scrollbar-color` is only for browsers without
+   ::-webkit-scrollbar (Firefox). */
+@supports not selector(::-webkit-scrollbar) {
+  * { scrollbar-color: #3a3a3a transparent; scrollbar-width: thin; }
+}
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #3a3a3a; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #4a4a4a; }
 
 .column-body {
   padding: 10px;
@@ -538,7 +609,9 @@ main { padding: 24px 28px 60px; }
   flex-direction: column;
   gap: 8px;
   min-height: 60px;
-  max-height: calc(100vh - 280px);
+  /* Fills the window under the header and column titles (~150px) while
+     leaving room for the main padding, so the page itself doesn't scroll. */
+  max-height: calc(100vh - 240px);
   overflow-y: auto;
   overflow-x: hidden;
 }
@@ -568,6 +641,33 @@ main { padding: 24px 28px 60px; }
 .card.age-fresh { border-left-color: #3a3a3a; }
 .card.age-warm { border-left-color: #c98a2a; }
 .card.age-stale { border-left-color: var(--red); }
+/* Quick "next stage" button + drag and drop (renderCard / renderBoard) */
+.card-advance {
+  margin-top: 8px;
+  width: 100%;
+  background: transparent;
+  border: 1px dashed var(--border);
+  color: var(--text-faint);
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+.card-advance:hover { border-style: solid; border-color: var(--red); color: var(--text); }
+.card-advance:disabled { opacity: 0.5; cursor: wait; }
+.card.dragging { opacity: 0.4; }
+.column.drop-target { border-color: var(--red); background: #1a0f0f; }
+.column-won.drop-target { border-color: var(--green); background: #0f1a13; }
+
+/* Clients / partners: a win, not a stale contact — see renderCard */
+.card.card-won { border-left-color: var(--green); }
+.card.card-won:hover { border-color: var(--green); }
+.card-followup.reorder-due { color: var(--green); }
 
 .card-top {
   display: flex;
@@ -847,12 +947,209 @@ textarea { resize: vertical; min-height: 64px; }
   border-radius: 50%;
   background: var(--red);
 }
-.timeline-stage { font-weight: 700; text-transform: capitalize; }
+.timeline-stage { font-weight: 700; }
 .timeline-time { color: var(--text-faint); font-size: 11px; }
 .timeline-note { color: var(--text-muted); margin-top: 2px; }
 
+/* ---------- STATS: period, activity, goal, funnel ---------- */
+.period-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 18px; }
+.period-chips button {
+  background: var(--surface); border: 1px solid var(--border); color: var(--text-muted);
+  padding: 7px 14px; border-radius: 16px; font-size: 12.5px; font-weight: 700; cursor: pointer;
+}
+.period-chips button.active { border-color: var(--red); color: var(--text); background: #2a1010; }
+.activity-grid { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); margin-bottom: 28px; }
+.activity-grid .stat-value { font-size: 28px; }
+.goal-card {
+  background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--green);
+  border-radius: 10px; padding: 14px 16px; margin-bottom: 14px;
+  display: flex; align-items: center; gap: 16px;
+}
+.goal-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.goal-text strong { font-size: 14px; }
+.goal-text span { color: var(--text-muted); font-size: 12.5px; }
+.goal-bar { height: 8px; background: var(--surface-2); border-radius: 4px; overflow: hidden; margin-top: 6px; }
+.goal-bar > div { height: 100%; background: linear-gradient(90deg, var(--red), #c98a2a); border-radius: 4px; }
+.goal-bar.reached > div { background: linear-gradient(90deg, #1f7a3d, var(--green)); }
+.funnel { display: flex; flex-direction: column; gap: 8px; max-width: 760px; margin-bottom: 8px; }
+.funnel-row { display: grid; grid-template-columns: 150px 1fr 80px; align-items: center; gap: 12px; font-size: 13px; }
+.funnel-label { color: var(--text-muted); font-weight: 600; }
+.funnel-bar { height: 22px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.funnel-bar > div { height: 100%; background: linear-gradient(90deg, var(--red-deep), var(--red)); }
+.funnel-row.won .funnel-bar > div { background: linear-gradient(90deg, #1f7a3d, var(--green)); }
+.funnel-row.won .funnel-label { color: var(--green); }
+.funnel-count { font-weight: 700; text-align: right; }
+.funnel-count small { color: var(--text-faint); font-weight: 500; margin-left: 4px; }
+
+/* ---------- DETAIL: summary card + folded sections ---------- */
+.detail-summary {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--red);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.summary-stage { margin: 0; font-weight: 700; font-size: 14px; }
+.summary-stage span { color: var(--text-faint); font-weight: 500; font-size: 12px; margin-left: 4px; }
+.summary-last-label { margin: 0; color: var(--text-muted); font-size: 11.5px; font-weight: 600; }
+.summary-last {
+  margin: 4px 0 0; font-size: 13px; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.summary-controls { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: flex-end; }
+.summary-followup { max-width: 260px; flex: 1 1 200px; }
+.temperature-picker { display: flex; flex-direction: column; gap: 5px; }
+.temperature-label { font-size: 12px; color: var(--text-muted); font-weight: 600; }
+.temperature-options { display: flex; gap: 6px; }
+.temperature-options button {
+  background: var(--surface); border: 1px solid var(--border); color: var(--text-muted);
+  padding: 8px 12px; border-radius: 6px; font-size: 12.5px; font-weight: 700; cursor: pointer;
+}
+.temperature-options button[data-temperature="froid"].active { border-color: #4a8fd8; color: #8cc0ff; background: #0f1a26; }
+.temperature-options button[data-temperature="tiede"].active { border-color: #c98a2a; color: #f0b660; background: #261c0f; }
+.temperature-options button[data-temperature="chaud"].active { border-color: var(--red); color: #ff8a6b; background: #2a1010; }
+.tag.temp-froid { border-color: #2e5a87; color: #8cc0ff; }
+.tag.temp-tiede { border-color: #7a5520; color: #f0b660; }
+.tag.temp-chaud { border-color: var(--red-deep); color: #ff8a6b; }
+
+.detail-coords, .danger-zone { margin-top: 18px; }
+.detail-coords > summary, .danger-zone > summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--text-muted); font-weight: 700;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.detail-coords > summary::-webkit-details-marker, .danger-zone > summary::-webkit-details-marker { display: none; }
+.detail-coords > summary::after, .danger-zone > summary::after { content: '+'; font-size: 16px; color: var(--text-faint); }
+.detail-coords[open] > summary::after, .danger-zone[open] > summary::after { content: '−'; }
+.detail-coords > summary:hover, .danger-zone > summary:hover { border-color: var(--text-faint); color: var(--text); }
+.detail-coords[open] > summary { margin-bottom: 12px; }
+.danger-zone > summary { color: var(--text-faint); font-weight: 600; text-transform: none; letter-spacing: 0; font-size: 12.5px; }
+.danger-zone .btn-danger { margin-top: 8px; }
+
+/* ---------- TODAY VIEW ---------- */
+/* One column up to ~1100px; beyond that, sections flow into two columns so
+   a wide screen isn't half empty. */
+.today { max-width: 1280px; }
+@media (min-width: 1100px) {
+  /* CSS columns rather than a grid: sections keep their urgency order
+     reading down the first column, then the second (a grid would zigzag). */
+  .today { columns: 2; column-gap: 28px; }
+  .today-header { column-span: all; }
+  .today-section { break-inside: avoid; }
+  .today-section:first-of-type { margin-top: 0; }
+}
+.today-birthdays .today-section-title { color: #e0a84a; }
+.today-birthdays .today-item { border-left: 3px solid #e0a84a; }
+.today-header .section-title { text-transform: capitalize; margin-bottom: 10px; }
+.today-section { margin-top: 22px; }
+.today-section-title {
+  font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--text-muted); margin: 0 0 10px; display: flex; align-items: center; gap: 8px;
+}
+.today-section .section-hint { margin: -4px 0 10px; }
+.today-count {
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+  border-radius: 10px; padding: 0 7px; font-size: 11px; letter-spacing: 0;
+}
+.today-overdue .today-section-title { color: var(--red); }
+.today-overdue .today-item { border-left: 3px solid var(--red); }
+.today-today .today-item { border-left: 3px solid #c98a2a; }
+.today-reorders .today-item { border-left: 3px solid #1f7a3d; }
+.today-list { display: flex; flex-direction: column; gap: 8px; }
+.today-item {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+}
+.today-item:hover { border-color: var(--red); }
+.today-item-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.today-item-name { font-weight: 700; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.today-item-detail { color: var(--text-faint); font-size: 12px; }
+.today-item-actions { display: flex; gap: 8px; flex: 0 0 auto; }
+.today-item-actions .btn-ghost { padding: 8px 12px; font-size: 12px; }
+.today-more { margin-top: 8px; }
+button.btn-whatsapp { border: none; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; gap: 6px; }
+
+/* ---------- MESSAGE TEMPLATES ---------- */
+.message-body, .templates-body { display: flex; flex-direction: column; gap: 14px; }
+.message-body .section-hint, .templates-body .section-hint { margin: 0; }
+.template-choices { display: flex; flex-wrap: wrap; gap: 8px; }
+.template-chip {
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+  padding: 7px 12px; border-radius: 16px; font-size: 12.5px; font-weight: 600; cursor: pointer;
+}
+.template-chip:hover { border-color: var(--red); }
+.template-chip.active { border-color: var(--red); background: #2a1010; }
+.modal-actions.spread { justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.templates-list { display: flex; flex-direction: column; gap: 8px; max-height: 260px; overflow-y: auto; }
+.template-item {
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px 12px; display: flex; gap: 10px; align-items: flex-start;
+}
+.template-item-main { flex: 1; min-width: 0; }
+.template-item-main strong { font-size: 13px; }
+.template-item-main p { margin: 4px 0 0; color: var(--text-muted); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.template-item-actions { display: flex; flex-direction: column; gap: 6px; }
+.template-item-actions .btn-ghost { padding: 5px 10px; font-size: 12px; }
+.template-form h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin: 6px 0 0; }
+.templates-body code, .message-body code { color: var(--text); background: var(--bg); padding: 1px 5px; border-radius: 4px; }
+
+/* ---------- PURCHASES ---------- */
+.reorder-row { align-items: center; flex-wrap: wrap; }
+.inline-input { display: flex; align-items: center; gap: 8px; color: var(--text-muted); }
+.inline-input input { width: 90px; flex: 0 0 90px; }
+.reorder-next { margin: 0; font-size: 12px; color: #6fcf8f; font-weight: 600; }
+.purchase-form { flex-direction: row; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.purchase-form input[type="date"] { flex: 0 0 150px; }
+.purchase-form input[name="product"] { flex: 2 1 160px; }
+.purchase-form input[name="amount"] { flex: 1 1 100px; }
+.purchases-list { display: flex; flex-direction: column; gap: 6px; max-height: 200px; overflow-y: auto; }
+.purchase-item {
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 7px 10px; display: flex; align-items: center; gap: 10px; font-size: 12.5px;
+}
+.purchase-date { color: var(--text-faint); flex: 0 0 auto; }
+.purchase-product { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.purchase-amount { font-weight: 700; flex: 0 0 auto; }
+.purchase-delete {
+  background: transparent; border: none; color: var(--text-faint); cursor: pointer; padding: 2px; font-size: 14px;
+}
+.purchase-delete:hover { color: var(--red); }
+
 @media (max-width: 900px) {
   .board { grid-template-columns: 1fr; }
+
+  /* One stage at a time, picked from the tabs (renderStageTabs). Collapsing
+     is a desktop thing: the active column always shows its cards, and the
+     page scrolls instead of the column. */
+  .stage-tabs {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    padding-bottom: 6px;
+    margin-bottom: 10px;
+    scrollbar-width: none;
+  }
+  .stage-tabs::-webkit-scrollbar { display: none; }
+  .board .column { display: none; }
+  .board .column.mobile-active { display: block; }
+  .column.mobile-active .column-body { display: flex; max-height: none; }
+  .column.mobile-active .progress-rail { display: block; }
+  .collapse-toggle { display: none; }
   .detail-body { grid-template-columns: 1fr; }
   .tabs { order: 3; width: 100%; justify-content: flex-start; }
 
@@ -905,4 +1202,10 @@ textarea { resize: vertical; min-height: 64px; }
   .phone-row select { flex: 0 0 90px; }
   .btn-whatsapp .btn-label { display: none; }
   .btn-whatsapp { padding: 9px 10px; }
+  .today-item { padding: 10px; gap: 8px; }
+  .funnel-row { grid-template-columns: 92px 1fr 64px; gap: 8px; font-size: 12px; }
+  .goal-card { flex-direction: column; align-items: stretch; }
+  .activity-grid { grid-template-columns: 1fr 1fr; }
+  .today-item-actions .btn-ghost { padding: 8px 9px; }
+  .purchase-form input[type="date"] { flex: 1 1 100%; }
 }

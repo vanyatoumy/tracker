@@ -300,6 +300,7 @@ const OfflineSync = (() => {
     if (filters.stage) out = out.filter(p => p.stage === filters.stage);
     if (filters.source) out = out.filter(p => p.source === filters.source);
     if (filters.interest_type) out = out.filter(p => p.interest_type === filters.interest_type);
+    if (filters.temperature) out = out.filter(p => p.temperature === filters.temperature);
     if (filters.country) out = out.filter(p => p.country === filters.country);
     if (filters.city) out = out.filter(p => (p.city || '').toLowerCase().includes(filters.city.toLowerCase()));
     if (filters.quarter) out = out.filter(p => (p.quarter || '').toLowerCase().includes(filters.quarter.toLowerCase()));
@@ -317,7 +318,7 @@ const OfflineSync = (() => {
   // trigger this pruning, since neither represents "everything that exists".
   async function replaceProspectCache(serverList, filters) {
     const isFullUnfiltered = !filters.archived && !filters.stage && !filters.source &&
-      !filters.interest_type && !filters.country && !filters.city && !filters.quarter && !filters.search;
+      !filters.interest_type && !filters.temperature && !filters.country && !filters.city && !filters.quarter && !filters.search;
 
     const store = await tx('prospects', 'readwrite');
     const existing = await reqToPromise(store.getAll());
@@ -552,7 +553,10 @@ const OfflineSync = (() => {
   async function replayEntry(entry, resolvedId) {
     switch (entry.kind) {
       case 'create': {
-        const created = await rawFetch('/api/prospects', { method: 'POST', body: JSON.stringify(entry.payload) });
+        // client_ref = the temp id: if this POST already went through but
+        // its response was lost, the retry gets the same contact back
+        // instead of creating a duplicate (see db.createProspect).
+        const created = await rawFetch('/api/prospects', { method: 'POST', body: JSON.stringify({ ...entry.payload, client_ref: entry.tempId }) });
         await removeCachedProspect(entry.tempId);
         await cacheProspect(created);
         const cachedInteractions = await getOne('interactions', entry.tempId);
@@ -601,7 +605,12 @@ const OfflineSync = (() => {
     { re: /^\/api\/prospects\/([^/]+)\/history$/, method: 'GET', kind: 'history' },
     { re: /^\/api\/prospects\/([^/]+)\/interactions$/, method: 'GET', kind: 'interactions' },
     { re: /^\/api\/prospects\/([^/]+)\/interactions$/, method: 'POST', kind: 'addInteraction' },
-    { re: /^\/api\/reminders$/, method: 'GET', kind: 'reminders' }
+    { re: /^\/api\/reminders$/, method: 'GET', kind: 'reminders' },
+    // Read-only offline (cached on each successful fetch): templates and
+    // purchases can only be created/edited online, but viewing them — and
+    // so sending a templated message — keeps working without signal.
+    { re: /^\/api\/templates$/, method: 'GET', kind: 'templates' },
+    { re: /^\/api\/prospects\/([^/]+)\/purchases$/, method: 'GET', kind: 'purchases' }
   ];
 
   function matchRoute(path, method) {
@@ -689,6 +698,12 @@ const OfflineSync = (() => {
       case 'me':
         await setUser(data);
         break;
+      case 'templates':
+        await put('meta', { key: 'templates', value: data });
+        break;
+      case 'purchases':
+        await put('meta', { key: `purchases:${route.id}`, value: data });
+        break;
     }
   }
 
@@ -746,6 +761,15 @@ const OfflineSync = (() => {
       case 'history': {
         const row = await getOne('history', route.id);
         return row ? row.items : [];
+      }
+      case 'templates': {
+        const row = await getOne('meta', 'templates');
+        return row ? row.value : [];
+      }
+      case 'purchases': {
+        const row = await getOne('meta', `purchases:${route.id}`);
+        if (row) return row.value;
+        throw new Error('Achats indisponibles hors ligne pour ce contact.');
       }
       case 'reminders': {
         const all = await getAll('prospects');

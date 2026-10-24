@@ -259,6 +259,15 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
     res.json(req.user);
 });
 
+// The user's own settings — just the weekly activity goal for now.
+app.patch('/api/auth/me', requireAuth, (req, res) => {
+    try {
+        if (!('weekly_goal' in req.body)) return res.json(req.user);
+        const goal = validate.number(req.body.weekly_goal, "L'objectif hebdomadaire", { min: 1, max: 1000, integer: true });
+        res.json(db.setWeeklyGoal(req.userId, goal ?? null));
+    } catch (err) { handleError(res, err); }
+});
+
 // ---------- ADMIN (all require auth + is_admin) ----------
 // Covers what used to require direct DB/CLI access: viewing accounts,
 // activating them, and clearing a lockout. Granting admin rights itself
@@ -301,12 +310,13 @@ app.post('/api/admin/users/:id/reset-password', requireAuth, requireAdmin, (req,
 
 app.get('/api/prospects', requireAuth, (req, res) => {
     try {
-        const { archived, stage, source, interest_type, country, city, quarter, search } = req.query;
+        const { archived, stage, source, interest_type, temperature, country, city, quarter, search } = req.query;
         res.json(db.listProspects(req.userId, {
             includeArchived: archived === '1',
             stage: stage || undefined,
             source: source || undefined,
             interest_type: interest_type || undefined,
+            temperature: temperature || undefined,
             country: country || undefined,
             city: city || undefined,
             quarter: quarter || undefined,
@@ -328,9 +338,10 @@ app.post('/api/prospects', requireAuth, (req, res) => {
         const interest_type = validate.oneOf(body.interest_type, "Le type d'interet", db.INTEREST_TYPES);
         const next_followup_at = validate.isoDate(body.next_followup_at, 'La date de relance');
         const facebook_profile_url = validate.url(body.facebook_profile_url, 'Le lien Facebook');
+        const client_ref = validate.str(body.client_ref, 'La reference client', { maxLength: 100 });
 
         res.status(201).json(db.createProspect(req.userId, {
-            name, phone, alt_phone, country, city, quarter, facebook_profile_url, source, interest_type, next_followup_at
+            name, phone, alt_phone, country, city, quarter, facebook_profile_url, source, interest_type, next_followup_at, client_ref
         }));
     } catch (err) { handleError(res, err); }
 });
@@ -391,6 +402,9 @@ app.patch('/api/prospects/:id', requireAuth, (req, res) => {
         if ('interest_type' in body) fields.interest_type = validate.oneOf(body.interest_type, "Le type d'interet", db.INTEREST_TYPES);
         if ('next_followup_at' in body) fields.next_followup_at = validate.isoDate(body.next_followup_at, 'La date de relance');
         if ('facebook_profile_url' in body) fields.facebook_profile_url = validate.url(body.facebook_profile_url, 'Le lien Facebook');
+        if ('reorder_interval_days' in body) fields.reorder_interval_days = validate.number(body.reorder_interval_days, 'Le delai de reachat', { min: 1, max: 365, integer: true });
+        if ('birthday' in body) fields.birthday = validate.dateOnly(body.birthday, "La date d'anniversaire");
+        if ('temperature' in body) fields.temperature = validate.oneOf(body.temperature, 'La temperature', db.TEMPERATURES);
 
         res.json(db.updateProspect(req.userId, req.params.id, fields));
     } catch (err) { handleError(res, err); }
@@ -440,6 +454,63 @@ app.post('/api/prospects/:id/interactions', requireAuth, (req, res) => {
     } catch (err) { handleError(res, err); }
 });
 
+// ---------- PURCHASES ----------
+
+app.get('/api/prospects/:id/purchases', requireAuth, (req, res) => {
+    try {
+        res.json(db.getPurchases(req.userId, req.params.id));
+    } catch (err) { handleError(res, err); }
+});
+
+app.post('/api/prospects/:id/purchases', requireAuth, (req, res) => {
+    try {
+        const purchased_at = validate.isoDate(req.body.purchased_at, "La date d'achat");
+        const product = validate.str(req.body.product, 'Le produit', { maxLength: 200 });
+        const amount = validate.number(req.body.amount, 'Le montant', { min: 0, max: 1e9 });
+        const note = validate.str(req.body.note, 'La note', { maxLength: 1000 });
+        res.status(201).json(db.addPurchase(req.userId, req.params.id, { purchased_at, product, amount, note }));
+    } catch (err) { handleError(res, err); }
+});
+
+app.delete('/api/prospects/:id/purchases/:purchaseId', requireAuth, (req, res) => {
+    try {
+        db.deletePurchase(req.userId, req.params.id, req.params.purchaseId);
+        res.status(204).end();
+    } catch (err) { handleError(res, err); }
+});
+
+// ---------- MESSAGE TEMPLATES ----------
+
+app.get('/api/templates', requireAuth, (req, res) => {
+    try {
+        res.json(db.listTemplates(req.userId));
+    } catch (err) { handleError(res, err); }
+});
+
+app.post('/api/templates', requireAuth, (req, res) => {
+    try {
+        const name = validate.str(req.body.name, 'Le nom du modele', { required: true, maxLength: 80 });
+        const body = validate.str(req.body.body, 'Le texte du modele', { required: true, maxLength: 1000 });
+        res.status(201).json(db.createTemplate(req.userId, { name, body }));
+    } catch (err) { handleError(res, err); }
+});
+
+app.patch('/api/templates/:id', requireAuth, (req, res) => {
+    try {
+        const fields = {};
+        if ('name' in req.body) fields.name = validate.str(req.body.name, 'Le nom du modele', { required: true, maxLength: 80 });
+        if ('body' in req.body) fields.body = validate.str(req.body.body, 'Le texte du modele', { required: true, maxLength: 1000 });
+        res.json(db.updateTemplate(req.userId, req.params.id, fields));
+    } catch (err) { handleError(res, err); }
+});
+
+app.delete('/api/templates/:id', requireAuth, (req, res) => {
+    try {
+        db.deleteTemplate(req.userId, req.params.id);
+        res.status(204).end();
+    } catch (err) { handleError(res, err); }
+});
+
 // ---------- REMINDERS ----------
 
 app.get('/api/reminders', requireAuth, (req, res) => {
@@ -450,21 +521,34 @@ app.get('/api/reminders', requireAuth, (req, res) => {
 
 // ---------- STATS ----------
 
+// Every stats route takes an optional ?days=N period (last N days); without
+// it, all history.
+function statsSince(req) {
+    const days = validate.number(req.query.days, 'La periode', { min: 1, max: 3650, integer: true });
+    return days ? new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString() : null;
+}
+
 app.get('/api/stats/benchmark', requireAuth, (req, res) => {
     try {
-        res.json(db.getConversionBenchmark(req.userId));
+        res.json(db.getConversionBenchmark(req.userId, statsSince(req)));
     } catch (err) { handleError(res, err); }
 });
 
 app.get('/api/stats/sources', requireAuth, (req, res) => {
     try {
-        res.json(db.getSourceStats(req.userId));
+        res.json(db.getSourceStats(req.userId, statsSince(req)));
     } catch (err) { handleError(res, err); }
 });
 
 app.get('/api/stats/countries', requireAuth, (req, res) => {
     try {
-        res.json(db.getCountryStats(req.userId));
+        res.json(db.getCountryStats(req.userId, statsSince(req)));
+    } catch (err) { handleError(res, err); }
+});
+
+app.get('/api/stats/activity', requireAuth, (req, res) => {
+    try {
+        res.json(db.getActivityStats(req.userId, statsSince(req)));
     } catch (err) { handleError(res, err); }
 });
 

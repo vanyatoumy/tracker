@@ -97,8 +97,16 @@ function createHarness() {
 
         let m;
         if (method === 'POST' && p === '/api/prospects') {
+            // Mirrors db.createProspect's client_ref idempotency.
+            const existing = body.client_ref && [...prospects.values()].find(x => x.client_ref === body.client_ref);
+            if (existing) return json(201, existing);
             const created = { id: randomUUID(), stage: 'nouveau', is_archived: 0, ...body };
             prospects.set(created.id, created);
+            if (network.loseNextResponse) {
+                // The server did the work, but the reply never reaches the phone.
+                network.loseNextResponse = false;
+                throw new TypeError('Failed to fetch');
+            }
             return json(201, created);
         }
         if (method === 'PATCH' && (m = p.match(/^\/api\/prospects\/([^/]+)$/))) {
@@ -257,4 +265,24 @@ test("another account logging in on the device never gets the previous account's
     await h.OfflineSync.syncPendingChanges();
     assert.equal(h.prospects.size, 1);
     assert.equal(await h.OfflineSync.pendingCount(), 0);
+});
+
+test('a create whose response was lost is not duplicated when the sync retries it', async () => {
+    const h = createHarness();
+    await loggedIn(h);
+
+    h.network.down = true;
+    const temp = await offlineWrite(h, '/api/prospects', 'POST', { name: 'Reseau instable' });
+
+    h.network.down = false;
+    h.network.loseNextResponse = true;
+    await h.OfflineSync.syncPendingChanges();
+    assert.equal(h.prospects.size, 1, 'the server created it…');
+    assert.equal(await h.OfflineSync.pendingCount(), 1, '…but the phone did not get the answer, so it is still queued');
+
+    await h.OfflineSync.syncPendingChanges();
+    assert.equal(h.prospects.size, 1, 'the retry must not create a second contact');
+    assert.equal(await h.OfflineSync.pendingCount(), 0);
+    const posts = h.calls.filter(c => c.method === 'POST');
+    assert.deepEqual(posts.map(c => c.body.client_ref), [temp.id, temp.id]);
 });

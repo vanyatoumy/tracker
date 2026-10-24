@@ -1,9 +1,12 @@
+// The first stage used to be labelled "Contact" — right next to "Contacte",
+// and the same word the app uses for any person in it. "A contacter" says
+// what it actually means: on the list, not reached yet.
 const STAGES = [
-  { key: 'nouveau', label: 'Contact' },
-  { key: 'contacte', label: 'Contacte' },
+  { key: 'nouveau', label: 'À contacter' },
+  { key: 'contacte', label: 'Contacté' },
   { key: 'prospect', label: 'Prospect' },
-  { key: 'interesse', label: 'Interesse' },
-  { key: 'en_decision', label: 'En Decision' },
+  { key: 'interesse', label: 'Intéressé' },
+  { key: 'en_decision', label: 'En décision' },
   { key: 'client', label: 'Client' },
   { key: 'partenaire', label: 'Partenaire' }
 ];
@@ -24,6 +27,7 @@ const SOURCE_LABELS = {
 
 let currentProspects = [];
 let activeProspectId = null;
+let activeProspect = null; // full object for the open detail panel
 let currentUser = null;
 let activeFilters = {};
 
@@ -532,10 +536,31 @@ let liveRefreshInterval = null;
 // re-renders from data already in memory (no network needed — the overdue
 // check just compares against the current time), and loadReminders() goes
 // through api(), so offline it's answered from the local cache instantly.
+//
+// renderBoard() wipes and rebuilds the whole column tree (board.innerHTML =
+// ''), so running it unconditionally every tick reset scroll position
+// mid-browse and could yank focus away from whatever the user was doing.
+// Skip the board re-render (but still refresh the reminders badge) while:
+// - any modal is open (add/detail/import/subscription) — the user is mid
+//   task, the board underneath isn't urgent for 20s;
+// - a text field anywhere has focus — covers the search box and any other
+//   in-place editing, not just modals.
+function isUserMidInput() {
+  const modalOpen = [...document.querySelectorAll('.modal-overlay')]
+    .some(m => !m.classList.contains('hidden'));
+  const active = document.activeElement;
+  const typing = active && ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName);
+  return modalOpen || typing;
+}
 function startLiveRefresh() {
   if (liveRefreshInterval) return;
   liveRefreshInterval = setInterval(() => {
-    renderBoard();
+    if (!isUserMidInput()) {
+      renderBoard();
+      // Same in-memory re-render for the today list: a follow-up time
+      // passing moves a contact from "today" to "overdue" etc.
+      if (document.querySelector('.tab-btn.active')?.dataset.view === 'today') renderToday();
+    }
     loadReminders().catch(() => { /* stale badge until the next tick beats no badge at all */ });
   }, 20000);
 }
@@ -577,10 +602,59 @@ async function bootApp() {
 // ============================================
 // BOARD RENDERING
 // ============================================
+
+// On phones the 7 columns can't sit side by side, and stacking them made one
+// endless page once a few hundred contacts were imported. Narrow screens
+// get a row of stage tabs instead (CSS shows them, and only the
+// .mobile-active column, under 900px); desktop ignores both.
+let mobileStage = (() => {
+  try { return localStorage.getItem('mobileStage') || 'nouveau'; } catch { return 'nouveau'; }
+})();
+
+function renderStageTabs() {
+  const tabs = document.getElementById('stageTabs');
+  tabs.innerHTML = STAGES.map(stage => {
+    const count = currentProspects.filter(p => p.stage === stage.key && !p.is_archived).length;
+    const won = WON_STAGES.includes(stage.key) ? 'won' : '';
+    return `<button class="stage-tab ${won} ${stage.key === mobileStage ? 'active' : ''}" data-mobile-stage="${stage.key}">${stage.label} <span class="stage-tab-count">${count}</span></button>`;
+  }).join('');
+  tabs.querySelector('.stage-tab.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
+
+document.getElementById('stageTabs').addEventListener('click', (e) => {
+  const tab = e.target.closest('[data-mobile-stage]');
+  if (!tab) return;
+  mobileStage = tab.dataset.mobileStage;
+  try { localStorage.setItem('mobileStage', mobileStage); } catch { /* per-device nicety only */ }
+  renderBoard();
+});
+
+async function moveStage(id, toStage, triggerEl) {
+  if (triggerEl) triggerEl.disabled = true;
+  try {
+    await api(`/api/prospects/${id}/stage`, { method: 'POST', body: JSON.stringify({ to_stage: toStage }) });
+    await refreshAll();
+  } catch (err) {
+    alert(err.message);
+    if (triggerEl) triggerEl.disabled = false;
+  }
+}
+
 function renderBoard() {
   const board = document.getElementById('board');
+  // board.innerHTML = '' below wipes every column's scroll position along
+  // with the DOM (each .column-body scrolls independently, not .board
+  // itself) — capture and restore them so re-renders (live refresh,
+  // filters, a stage change elsewhere) don't visibly snap columns back to
+  // the top mid-browse.
+  const scrollTops = {};
+  STAGES.forEach(stage => {
+    const el = document.getElementById(`col-${stage.key}`);
+    if (el) scrollTops[stage.key] = el.scrollTop;
+  });
   board.innerHTML = '';
   const collapsed = getCollapsedStages();
+  renderStageTabs();
 
   STAGES.forEach((stage, idx) => {
     const items = currentProspects.filter(p => p.stage === stage.key && !p.is_archived);
@@ -588,7 +662,7 @@ function renderBoard() {
     const isCollapsed = collapsed.has(stage.key);
 
     const col = document.createElement('div');
-    col.className = `column ${isCollapsed ? 'collapsed' : ''}`;
+    col.className = `column ${isCollapsed ? 'collapsed' : ''} ${WON_STAGES.includes(stage.key) ? 'column-won' : ''} ${stage.key === mobileStage ? 'mobile-active' : ''}`;
     col.innerHTML = `
       <div class="column-header">
         <p class="column-title">
@@ -612,17 +686,36 @@ function renderBoard() {
     });
 
     const body = col.querySelector('.column-body');
+    // Drop target for dragged cards — the whole column, so a collapsed or
+    // empty column still accepts a card.
+    col.addEventListener('dragover', (e) => { e.preventDefault(); col.classList.add('drop-target'); });
+    col.addEventListener('dragleave', (e) => { if (!col.contains(e.relatedTarget)) col.classList.remove('drop-target'); });
+    col.addEventListener('drop', (e) => {
+      e.preventDefault();
+      col.classList.remove('drop-target');
+      const id = e.dataTransfer.getData('text/plain');
+      const p = currentProspects.find(x => x.id === id);
+      if (p && p.stage !== stage.key) moveStage(id, stage.key);
+    });
     if (items.length === 0) {
       body.innerHTML = `<div class="empty-column">Aucun contact</div>`;
       return;
     }
     items.forEach(p => body.appendChild(renderCard(p)));
+    if (scrollTops[stage.key]) body.scrollTop = scrollTops[stage.key];
   });
 }
 
+const WON_STAGES = ['client', 'partenaire'];
+const TEMPERATURE_LABELS = { froid: 'Froid', tiede: 'Tiede', chaud: 'Chaud' };
+
 function renderCard(p) {
+  // A client/partner who hasn't "moved" in 60 days isn't going stale — they
+  // are a win. The age colours (grey -> amber -> red) only make sense for
+  // contacts still in the pipeline.
+  const isWon = WON_STAGES.includes(p.stage);
   const card = document.createElement('div');
-  card.className = `card ${ageClass(p.stage_updated_at)}`;
+  card.className = `card ${isWon ? 'card-won' : ageClass(p.stage_updated_at)}`;
   card.dataset.id = p.id;
 
   // No inline onclick="event.stopPropagation()" on these links: the CSP
@@ -651,6 +744,19 @@ function renderCard(p) {
 
   const locationBits = [p.quarter, p.city, p.country].filter(Boolean).join(', ');
 
+  let ageHtml = `<span>${relativeTime(p.stage_updated_at)}</span>`;
+  if (isWon) {
+    const stageLabel = STAGES.find(s => s.key === p.stage).label;
+    const days = Math.floor(daysSince(p.stage_updated_at));
+    ageHtml = `<span>${stageLabel} ${days < 1 ? "depuis aujourd'hui" : `depuis ${days} j`}</span>`;
+  }
+  let reorderHtml = '';
+  const reorderAt = isWon ? Planning.reorderDueAt(p) : null;
+  if (reorderAt) {
+    const due = reorderAt <= new Date();
+    reorderHtml = `<div class="card-followup ${due ? 'reorder-due' : 'upcoming'}">${icon('calendar')} ${due ? 'Reachat a proposer' : 'Reachat le ' + reorderAt.toLocaleDateString('fr-FR')}</div>`;
+  }
+
   card.innerHTML = `
     <div class="card-top">
       <p class="card-name">${escapeHtml(p.name)}</p>
@@ -659,13 +765,39 @@ function renderCard(p) {
     <div class="card-meta">
       ${p.source ? `<span class="tag">${sourceLabel(p.source)}</span>` : ''}
       ${p.interest_type && p.interest_type !== 'indecis' ? `<span class="tag">${p.interest_type === 'opportunite' ? 'Opportunite' : 'Produit'}</span>` : ''}
+      ${TEMPERATURE_LABELS[p.temperature] ? `<span class="tag temp-${p.temperature}">${TEMPERATURE_LABELS[p.temperature]}</span>` : ''}
     </div>
     ${locationBits ? `<div class="card-meta"><span class="tag">${icon('mapPin')} ${escapeHtml(locationBits)}</span></div>` : ''}
-    <div class="card-meta"><span>${relativeTime(p.stage_updated_at)}</span></div>
-    ${followupHtml}
+    <div class="card-meta">${ageHtml}</div>
+    ${followupHtml}${reorderHtml}
   `;
+  // Quick "next stage" button — the one move a rep makes all day, without
+  // opening the detail panel (works on phones, where there's no drag).
+  const stageIdx = STAGES.findIndex(s => s.key === p.stage);
+  const next = STAGES[stageIdx + 1];
+  if (next) {
+    const advance = document.createElement('button');
+    advance.className = 'card-advance';
+    advance.title = `Passer a « ${next.label} »`;
+    advance.innerHTML = `${escapeHtml(next.label)} ${icon('chevronRight')}`;
+    advance.addEventListener('click', (e) => {
+      e.stopPropagation();
+      moveStage(p.id, next.key, advance);
+    });
+    card.appendChild(advance);
+  }
+
+  // Desktop: drag the card onto another column (see the drop handlers in renderBoard).
+  card.draggable = true;
+  card.addEventListener('dragstart', (e) => {
+    e.dataTransfer.setData('text/plain', p.id);
+    e.dataTransfer.effectAllowed = 'move';
+    card.classList.add('dragging');
+  });
+  card.addEventListener('dragend', () => card.classList.remove('dragging'));
+
   card.addEventListener('click', (e) => {
-    if (e.target.closest('a')) return;
+    if (e.target.closest('a, button')) return;
     openDetail(p.id);
   });
   return card;
@@ -690,6 +822,7 @@ function readFilters() {
     search: document.getElementById('filterSearch').value.trim(),
     source: document.getElementById('filterSource').value,
     interest_type: document.getElementById('filterInterest').value,
+    temperature: document.getElementById('filterTemperature').value,
     country: document.getElementById('filterCountry').value,
     city: document.getElementById('filterCity').value.trim()
   };
@@ -708,7 +841,7 @@ let filterDebounce;
     filterDebounce = setTimeout(() => { activeFilters = readFilters(); updateFilterBadge(); loadProspects(); }, 300);
   });
 });
-['filterSource', 'filterInterest', 'filterCountry'].forEach(id => {
+['filterSource', 'filterInterest', 'filterTemperature', 'filterCountry'].forEach(id => {
   document.getElementById(id).addEventListener('change', () => {
     activeFilters = readFilters();
     updateFilterBadge();
@@ -719,6 +852,7 @@ document.getElementById('clearFilters').addEventListener('click', () => {
   document.getElementById('filterSearch').value = '';
   document.getElementById('filterSource').value = '';
   document.getElementById('filterInterest').value = '';
+  document.getElementById('filterTemperature').value = '';
   document.getElementById('filterCountry').value = '';
   document.getElementById('filterCity').value = '';
   activeFilters = {};
@@ -775,8 +909,93 @@ document.getElementById('notifList').addEventListener('click', (e) => {
   if (wa) window.open(wa, '_blank', 'noopener');
 });
 
+// Period for the whole stats screen ('' = all time), remembered per device.
+let statsDays = (() => {
+  try { return localStorage.getItem('statsDays') ?? '30'; } catch { return '30'; }
+})();
+
+document.getElementById('statsPeriod').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-days]');
+  if (!btn) return;
+  statsDays = btn.dataset.days;
+  try { localStorage.setItem('statsDays', statsDays); } catch { /* per-device nicety only */ }
+  await loadStats();
+});
+
+const FUNNEL_LABELS = { nouveau: 'Ajoutes', contacte: 'Contactes', prospect: 'Prospects', interesse: 'Interesses', en_decision: 'En decision', converti: 'Clients / partenaires' };
+
+function renderGoalCard(activity) {
+  const goal = currentUser?.weekly_goal;
+  const done = activity.last_7_days_actions;
+  const card = document.getElementById('goalCard');
+  if (!goal) {
+    card.innerHTML = `
+      <div class="goal-text">
+        <strong>${done} action${done > 1 ? 's' : ''} ces 7 derniers jours</strong>
+        <span>Messages, appels et rencontres. Fixe-toi un objectif pour suivre ta regularite.</span>
+      </div>
+      <button class="btn-ghost" data-set-goal>Fixer un objectif</button>`;
+    return;
+  }
+  const pct = Math.min(100, Math.round((done / goal) * 100));
+  const message = pct >= 100 ? 'Objectif atteint, bravo ! Continue sur cette lancee.'
+    : pct >= 60 ? 'Tu y es presque, garde le rythme.'
+    : done > 0 ? "C'est parti — chaque message compte."
+    : 'Un premier message aujourd\'hui ?';
+  card.innerHTML = `
+    <div class="goal-text">
+      <strong>${done} / ${goal} actions ces 7 derniers jours</strong>
+      <span>${message}</span>
+      <div class="goal-bar ${pct >= 100 ? 'reached' : ''}"><div style="width:${pct}%"></div></div>
+    </div>
+    <button class="btn-ghost" data-set-goal>Modifier</button>`;
+}
+
+document.getElementById('goalCard').addEventListener('click', async (e) => {
+  if (!e.target.closest('[data-set-goal]')) return;
+  const answer = prompt("Combien d'actions (messages, appels, rencontres) veux-tu faire par semaine ?\nLaisse vide pour retirer l'objectif.", currentUser?.weekly_goal || 30);
+  if (answer === null) return;
+  try {
+    currentUser = await api('/api/auth/me', {
+      method: 'PATCH',
+      body: JSON.stringify({ weekly_goal: answer.trim() === '' ? null : Number(answer) })
+    });
+    await loadStats();
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
 async function loadStats() {
-  const bench = await api('/api/stats/benchmark');
+  const qs = statsDays ? `?days=${statsDays}` : '';
+  document.querySelectorAll('#statsPeriod [data-days]').forEach(b => b.classList.toggle('active', b.dataset.days === statsDays));
+
+  const activity = await api(`/api/stats/activity${qs}`);
+  renderGoalCard(activity);
+  const tile = (label, value, note = '') => `
+    <div class="stat-card"><p class="stat-label">${label}</p><p class="stat-value">${value}</p>${note ? `<p class="stat-note">${note}</p>` : ''}</div>`;
+  const i = activity.interactions;
+  document.getElementById('activityGrid').innerHTML =
+    tile('Actions', activity.actions, `${i.message} message${i.message > 1 ? 's' : ''} · ${i.appel} appel${i.appel > 1 ? 's' : ''} · ${i.rencontre} rencontre${i.rencontre > 1 ? 's' : ''}`) +
+    tile('Nouveaux contacts', activity.new_contacts) +
+    tile('Etapes franchies', activity.stage_advances, 'Contacts que tu as fait avancer') +
+    tile('Conversions', activity.conversions, 'Nouveaux clients / partenaires') +
+    tile("Chiffre d'affaires", escapeHtml(Number(activity.revenue).toLocaleString('fr-FR')), `${activity.purchases} achat${activity.purchases > 1 ? 's' : ''} enregistre${activity.purchases > 1 ? 's' : ''}`);
+
+  const top = activity.funnel[0].count;
+  document.getElementById('funnel').innerHTML = top === 0
+    ? `<p class="section-hint">Aucun contact ajoute pendant cette periode.</p>`
+    : activity.funnel.map(f => {
+        const pct = Math.round((f.count / top) * 100);
+        return `
+          <div class="funnel-row ${f.stage === 'converti' ? 'won' : ''}">
+            <span class="funnel-label">${FUNNEL_LABELS[f.stage]}</span>
+            <div class="funnel-bar"><div style="width:${Math.max(pct, f.count ? 2 : 0)}%"></div></div>
+            <span class="funnel-count">${f.count} <small>${pct}%</small></span>
+          </div>`;
+      }).join('');
+
+  const bench = await api(`/api/stats/benchmark${qs}`);
   document.getElementById('statCount').textContent = bench.count;
   document.getElementById('statMedian').textContent = bench.median_days !== null ? `${bench.median_days} j` : '—';
   document.getElementById('statMin').textContent = bench.min_days !== null ? `${bench.min_days} j` : '—';
@@ -785,14 +1004,14 @@ async function loadStats() {
     ? "Pas encore de conversion enregistree"
     : `Base sur ${bench.count} conversion(s) reelle(s)`;
 
-  const sources = await api('/api/stats/sources');
+  const sources = await api(`/api/stats/sources${qs}`);
   document.querySelector('#sourceTable tbody').innerHTML = sources.length === 0
     ? `<tr><td colspan="4" style="color:var(--text-faint)">Aucune donnee pour le moment</td></tr>`
     : sources.map(s => `
         <tr><td>${sourceLabel(s.source)}</td><td>${s.total}</td><td>${s.converted}</td><td>${s.conversion_rate}%</td></tr>
       `).join('');
 
-  const countries = await api('/api/stats/countries');
+  const countries = await api(`/api/stats/countries${qs}`);
   document.querySelector('#countryTable tbody').innerHTML = countries.length === 0
     ? `<tr><td colspan="4" style="color:var(--text-faint)">Aucune donnee pour le moment</td></tr>`
     : countries.map(c => `
@@ -835,9 +1054,298 @@ async function refreshAll() {
   await loadProspects();
   await loadReminders();
   const activeView = document.querySelector('.tab-btn.active').dataset.view;
+  if (activeView === 'today') await loadToday();
   if (activeView === 'stats') await loadStats();
   if (activeView === 'archived') await loadArchived();
 }
+
+// ============================================
+// TODAY VIEW — "who do I contact today?" (rules in planning.js)
+// ============================================
+const TODAY_SECTIONS = [
+  { key: 'birthdays', title: 'Anniversaires', hint: 'Un petit message aujourd\'hui fait toujours plaisir.' },
+  { key: 'overdue', title: 'Relances en retard' },
+  { key: 'today', title: "Relances d'aujourd'hui" },
+  { key: 'reorders', title: 'Reachats a proposer', hint: 'Clients dont le delai de reachat est atteint.' },
+  { key: 'cold', title: 'Contacts qui refroidissent', hint: `Sans mouvement depuis ${Planning.COLD_AFTER_DAYS} jours ou plus, et aucune relance prevue.` },
+  { key: 'untouched', title: 'Jamais contactes', hint: 'Nouveaux contacts sans relance prevue.' }
+];
+// Long sections (e.g. hundreds of imported, never-contacted contacts) show
+// the first few and a "show more" button rather than one endless page.
+const TODAY_SECTION_LIMIT = 10;
+const expandedTodaySections = new Set();
+let todayProspects = [];
+
+// The board's list is filtered by the search/filter panel; this view must
+// always see everything, so it only reuses that list when no filter is on.
+async function loadToday({ fresh = false } = {}) {
+  const filtered = Object.values(activeFilters).some(Boolean);
+  todayProspects = (fresh || filtered) ? await api('/api/prospects') : currentProspects;
+  renderToday();
+}
+
+function todayItemDetail(sectionKey, item) {
+  const p = item.prospect;
+  switch (sectionKey) {
+    case 'birthdays':
+      return `C'est son anniversaire aujourd'hui · ${STAGES.find(s => s.key === p.stage)?.label || p.stage}`;
+    case 'overdue':
+      return `En retard de ${item.days} j · prevue le ${formatDateTime(p.next_followup_at)}`;
+    case 'today':
+      return `Prevue a ${new Date(p.next_followup_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`;
+    case 'reorders':
+      return `Dernier achat le ${new Date(p.last_purchase_at).toLocaleDateString('fr-FR')} · ` +
+        (item.days <= 0 ? "reachat prevu aujourd'hui" : `reachat depasse de ${item.days} j`);
+    case 'cold':
+      return `${STAGES.find(s => s.key === p.stage)?.label || p.stage} · sans mouvement depuis ${item.days} j`;
+    case 'untouched':
+      return item.days === 0 ? "Ajoute aujourd'hui" : `Ajoute il y a ${item.days} j`;
+    default:
+      return '';
+  }
+}
+
+function renderToday() {
+  const container = document.getElementById('todayContent');
+  const sections = Planning.buildToday(todayProspects);
+  const total = TODAY_SECTIONS.reduce((n, s) => n + sections[s.key].length, 0);
+  const dateLabel = new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+
+  let html = `
+    <div class="today-header">
+      <h2 class="section-title">${escapeHtml(dateLabel)}</h2>
+      <p class="section-hint">${total === 0 ? "Rien d'urgent aujourd'hui. Profites-en pour ajouter de nouveaux contacts !" : `${total} contact${total > 1 ? 's' : ''} a traiter`}</p>
+    </div>`;
+
+  for (const section of TODAY_SECTIONS) {
+    const items = sections[section.key];
+    if (items.length === 0) continue;
+    const expanded = expandedTodaySections.has(section.key);
+    const shown = expanded ? items : items.slice(0, TODAY_SECTION_LIMIT);
+    html += `
+      <section class="today-section today-${section.key}">
+        <h3 class="today-section-title">${section.title} <span class="today-count">${items.length}</span></h3>
+        ${section.hint ? `<p class="section-hint">${section.hint}</p>` : ''}
+        <div class="today-list">
+          ${shown.map(item => {
+            const p = item.prospect;
+            const canMessage = !!(p.phone || p.alt_phone);
+            return `
+              <div class="today-item" data-id="${escapeHtml(p.id)}">
+                <div class="today-item-main">
+                  <span class="today-item-name">${escapeHtml(p.name)}</span>
+                  <span class="today-item-detail">${escapeHtml(todayItemDetail(section.key, item))}</span>
+                </div>
+                <div class="today-item-actions">
+                  ${canMessage ? `<button class="btn-whatsapp" data-message="${escapeHtml(p.id)}" title="Envoyer un message WhatsApp">${icon('messageCircle')} <span class="btn-label">Message</span></button>` : ''}
+                  <button class="btn-ghost" data-snooze="${escapeHtml(p.id)}" title="Programmer une relance demain a 9h">Demain</button>
+                </div>
+              </div>`;
+          }).join('')}
+        </div>
+        ${items.length > shown.length ? `<button class="btn-ghost today-more" data-expand="${section.key}">Voir les ${items.length - shown.length} autres</button>` : ''}
+      </section>`;
+  }
+  container.innerHTML = html;
+}
+
+document.getElementById('todayContent').addEventListener('click', async (e) => {
+  const expandBtn = e.target.closest('[data-expand]');
+  if (expandBtn) {
+    expandedTodaySections.add(expandBtn.dataset.expand);
+    renderToday();
+    return;
+  }
+  const messageBtn = e.target.closest('[data-message]');
+  if (messageBtn) {
+    const p = todayProspects.find(x => x.id === messageBtn.dataset.message);
+    if (p) openMessageModal(p);
+    return;
+  }
+  const snoozeBtn = e.target.closest('[data-snooze]');
+  if (snoozeBtn) {
+    snoozeBtn.disabled = true;
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(9, 0, 0, 0);
+    try {
+      const updated = await api(`/api/prospects/${snoozeBtn.dataset.snooze}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ next_followup_at: tomorrow.toISOString() })
+      });
+      await syncFollowupNotification(updated);
+      await refreshAll();
+    } catch (err) {
+      alert(err.message);
+      snoozeBtn.disabled = false;
+    }
+    return;
+  }
+  const row = e.target.closest('.today-item');
+  if (row) openDetail(row.dataset.id);
+});
+
+// ============================================
+// MESSAGE TEMPLATES (send from a contact + manage)
+// ============================================
+const messageModal = document.getElementById('messageModal');
+const templatesModal = document.getElementById('templatesModal');
+let messageTemplates = [];
+let messageTarget = null;      // prospect the message modal is for
+let messageTemplateUsed = null; // template picked, for the interaction log
+
+async function loadTemplates() {
+  messageTemplates = await api('/api/templates');
+  return messageTemplates;
+}
+
+async function openMessageModal(prospect) {
+  messageTarget = prospect;
+  messageTemplateUsed = null;
+  document.getElementById('messageModalTitle').textContent = `Message a ${prospect.name}`;
+  document.getElementById('messageText').value = '';
+  messageModal.classList.remove('hidden');
+  await renderTemplateChoices();
+}
+
+async function renderTemplateChoices() {
+  const container = document.getElementById('messageTemplateChoices');
+  try {
+    await loadTemplates();
+  } catch (err) {
+    container.innerHTML = `<p class="section-hint">${escapeHtml(err.message)}</p>`;
+    return;
+  }
+  container.innerHTML = messageTemplates.length === 0
+    ? `<p class="section-hint">Aucun modele pour l'instant. Cree ton premier avec « Gerer les modeles », ou ecris ton message directement.</p>`
+    : messageTemplates.map(t => `<button type="button" class="template-chip ${messageTemplateUsed && messageTemplateUsed.id === t.id ? 'active' : ''}" data-template="${escapeHtml(t.id)}">${escapeHtml(t.name)}</button>`).join('');
+}
+
+document.getElementById('messageTemplateChoices').addEventListener('click', (e) => {
+  const chip = e.target.closest('[data-template]');
+  if (!chip) return;
+  const t = messageTemplates.find(x => x.id === chip.dataset.template);
+  if (!t) return;
+  messageTemplateUsed = t;
+  document.getElementById('messageText').value = Planning.fillTemplate(t.body, messageTarget, currentUser);
+  document.querySelectorAll('#messageTemplateChoices .template-chip').forEach(c => c.classList.toggle('active', c === chip));
+});
+
+document.getElementById('messageSendBtn').addEventListener('click', async () => {
+  const p = messageTarget;
+  const text = document.getElementById('messageText').value.trim();
+  const url = Planning.whatsappLink(p.phone || p.alt_phone, text);
+  if (!url) { alert("Ce contact n'a pas de numero de telephone."); return; }
+  // Open first, synchronously inside the click: a window.open() that comes
+  // after an await is treated as a popup and blocked by browsers.
+  window.open(url, '_blank', 'noopener');
+  messageModal.classList.add('hidden');
+
+  if (!text) return;
+  const content = (messageTemplateUsed ? `WhatsApp (modele « ${messageTemplateUsed.name} ») : ` : 'WhatsApp : ') + text;
+  try {
+    await api(`/api/prospects/${p.id}/interactions`, {
+      method: 'POST',
+      body: JSON.stringify({ type: 'message', content: content.slice(0, 2000) })
+    });
+    // Reaching out to a brand-new contact means they're now contacted.
+    if (p.stage === 'nouveau') {
+      await api(`/api/prospects/${p.id}/stage`, { method: 'POST', body: JSON.stringify({ to_stage: 'contacte' }) });
+    }
+    if (!detailModal.classList.contains('hidden') && activeProspectId === p.id) await openDetail(p.id);
+    await refreshAll();
+  } catch (err) {
+    alert(`Message ouvert dans WhatsApp, mais pas enregistre dans l'historique : ${err.message}`);
+  }
+});
+
+document.getElementById('messageManageBtn').addEventListener('click', () => openTemplatesModal());
+document.getElementById('templatesBtn').addEventListener('click', () => openTemplatesModal());
+
+function resetTemplateForm() {
+  const form = document.getElementById('templateForm');
+  form.reset();
+  form.elements.id.value = '';
+  document.getElementById('templateFormTitle').textContent = 'Nouveau modele';
+  document.getElementById('templateCancelEdit').classList.add('hidden');
+}
+
+async function openTemplatesModal() {
+  resetTemplateForm();
+  templatesModal.classList.remove('hidden');
+  await renderTemplatesList();
+}
+
+async function renderTemplatesList() {
+  const list = document.getElementById('templatesList');
+  try {
+    await loadTemplates();
+  } catch (err) {
+    list.innerHTML = `<p class="section-hint">${escapeHtml(err.message)}</p>`;
+    return;
+  }
+  list.innerHTML = messageTemplates.length === 0
+    ? `<p class="section-hint">Aucun modele enregistre.</p>`
+    : messageTemplates.map(t => `
+        <div class="template-item">
+          <div class="template-item-main">
+            <strong>${escapeHtml(t.name)}</strong>
+            <p>${escapeHtml(t.body)}</p>
+          </div>
+          <div class="template-item-actions">
+            <button class="btn-ghost" data-edit-template="${escapeHtml(t.id)}">Modifier</button>
+            <button class="btn-ghost" data-delete-template="${escapeHtml(t.id)}">Supprimer</button>
+          </div>
+        </div>`).join('');
+}
+
+document.getElementById('templatesList').addEventListener('click', async (e) => {
+  const editBtn = e.target.closest('[data-edit-template]');
+  if (editBtn) {
+    const t = messageTemplates.find(x => x.id === editBtn.dataset.editTemplate);
+    if (!t) return;
+    const form = document.getElementById('templateForm');
+    form.elements.id.value = t.id;
+    form.elements.name.value = t.name;
+    form.elements.body.value = t.body;
+    document.getElementById('templateFormTitle').textContent = `Modifier « ${t.name} »`;
+    document.getElementById('templateCancelEdit').classList.remove('hidden');
+    form.elements.name.focus();
+    return;
+  }
+  const deleteBtn = e.target.closest('[data-delete-template]');
+  if (deleteBtn) {
+    if (!confirm('Supprimer ce modele ?')) return;
+    try {
+      await api(`/api/templates/${deleteBtn.dataset.deleteTemplate}`, { method: 'DELETE' });
+      resetTemplateForm();
+      await renderTemplatesList();
+      if (!messageModal.classList.contains('hidden')) await renderTemplateChoices();
+    } catch (err) {
+      alert(err.message);
+    }
+  }
+});
+
+document.getElementById('templateCancelEdit').addEventListener('click', resetTemplateForm);
+
+document.getElementById('templateForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const form = e.target;
+  const id = form.elements.id.value;
+  const payload = { name: form.elements.name.value, body: form.elements.body.value };
+  try {
+    await api(id ? `/api/templates/${id}` : '/api/templates', {
+      method: id ? 'PATCH' : 'POST',
+      body: JSON.stringify(payload)
+    });
+    resetTemplateForm();
+    await renderTemplatesList();
+    if (!messageModal.classList.contains('hidden')) await renderTemplateChoices();
+  } catch (err) {
+    alert(err.message);
+  }
+});
 
 // ============================================
 // TABS
@@ -850,6 +1358,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     const view = btn.dataset.view;
     document.getElementById(view + 'View').classList.remove('hidden');
     document.getElementById('filterBar').classList.toggle('hidden', view !== 'board');
+    if (view === 'today') await loadToday({ fresh: true });
     if (view === 'stats') await loadStats();
     if (view === 'archived') await loadArchived();
     if (view === 'board') await loadProspects();
@@ -1183,6 +1692,11 @@ importConfirmBtn.addEventListener('click', async () => {
 const detailModal = document.getElementById('detailModal');
 
 async function openDetail(id) {
+  // openDetail() also re-renders the open panel after each save; only a
+  // switch to another contact folds the details / "Autres actions" back up.
+  if (id !== activeProspectId || detailModal.classList.contains('hidden')) {
+    detailModal.querySelectorAll('details').forEach(d => { d.open = false; });
+  }
   activeProspectId = id;
   const p = await api(`/api/prospects/${id}`);
 
@@ -1268,11 +1782,117 @@ async function openDetail(id) {
   document.getElementById('detailInterestGroup').classList.toggle('hidden', stageIdx < INTERESSE_INDEX);
   document.getElementById('detailInterest').value = p.interest_type || 'indecis';
 
+  document.getElementById('detailBirthday').value = p.birthday || '';
+  renderTemperaturePicker(p.temperature);
+
+  activeProspect = p;
+  document.getElementById('detailTemplateBtn').classList.toggle('hidden', !(p.phone || p.alt_phone));
+
+  // Purchases matter once someone is a client — or if any were recorded
+  // before they moved stage, so that history doesn't silently disappear.
+  const showPurchases = ['client', 'partenaire'].includes(p.stage) || !!p.last_purchase_at;
+  document.getElementById('purchasesSection').classList.toggle('hidden', !showPurchases);
+  if (showPurchases) {
+    document.getElementById('reorderInterval').value = p.reorder_interval_days || '';
+    renderReorderNext(p);
+    document.querySelector('#purchaseForm [name="purchased_at"]').value = toDateInputValue(new Date());
+    await loadPurchases(id);
+  }
+
   await loadInteractions(id);
   await loadHistory(id);
 
   detailModal.classList.remove('hidden');
 }
+
+document.getElementById('detailTemplateBtn').addEventListener('click', () => {
+  if (activeProspect) openMessageModal(activeProspect);
+});
+
+function toDateInputValue(d) {
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function renderReorderNext(p) {
+  const el = document.getElementById('reorderNext');
+  const dueAt = Planning.reorderDueAt(p);
+  if (!p.reorder_interval_days) el.textContent = '';
+  else if (!p.last_purchase_at) el.textContent = 'Ajoute un achat pour activer le rappel.';
+  else if (!dueAt) el.textContent = 'Le rappel ne concerne que les clients et partenaires.';
+  else el.textContent = `Prochain reachat : ${dueAt.toLocaleDateString('fr-FR')}${dueAt < new Date() ? ' (a relancer)' : ''}`;
+}
+
+async function loadPurchases(id) {
+  const list = document.getElementById('purchasesList');
+  let items;
+  try {
+    items = await api(`/api/prospects/${id}/purchases`);
+  } catch (err) {
+    list.innerHTML = `<p class="section-hint">${escapeHtml(err.message)}</p>`;
+    return;
+  }
+  list.innerHTML = items.length === 0
+    ? `<p class="section-hint">Aucun achat enregistre.</p>`
+    : items.map(x => `
+        <div class="purchase-item">
+          <span class="purchase-date">${new Date(x.purchased_at).toLocaleDateString('fr-FR')}</span>
+          <span class="purchase-product">${escapeHtml(x.product || '—')}</span>
+          <span class="purchase-amount">${x.amount !== null && x.amount !== undefined ? escapeHtml(Number(x.amount).toLocaleString('fr-FR')) : ''}</span>
+          <button class="purchase-delete" data-delete-purchase="${escapeHtml(x.id)}" title="Supprimer cet achat">${icon('x')}</button>
+        </div>`).join('');
+}
+
+document.getElementById('reorderInterval').addEventListener('change', async (e) => {
+  const value = e.target.value.trim();
+  try {
+    const updated = await api(`/api/prospects/${activeProspectId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ reorder_interval_days: value === '' ? null : Number(value) })
+    });
+    activeProspect = { ...activeProspect, ...updated };
+    renderReorderNext(activeProspect);
+    await refreshAll();
+  } catch (err) {
+    alert(err.message);
+    e.target.value = activeProspect?.reorder_interval_days || '';
+  }
+});
+
+document.getElementById('purchaseForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const form = e.target;
+  const [y, m, d] = form.elements.purchased_at.value.split('-').map(Number);
+  try {
+    await api(`/api/prospects/${activeProspectId}/purchases`, {
+      method: 'POST',
+      body: JSON.stringify({
+        // Noon local time: a date-only purchase must not slide to the
+        // previous/next day once converted to UTC.
+        purchased_at: new Date(y, m - 1, d, 12).toISOString(),
+        product: form.elements.product.value || null,
+        amount: form.elements.amount.value === '' ? null : Number(form.elements.amount.value)
+      })
+    });
+    form.reset();
+    await openDetail(activeProspectId);
+    await refreshAll();
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+document.getElementById('purchasesList').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-delete-purchase]');
+  if (!btn || !confirm('Supprimer cet achat ?')) return;
+  try {
+    await api(`/api/prospects/${activeProspectId}/purchases/${btn.dataset.deletePurchase}`, { method: 'DELETE' });
+    await openDetail(activeProspectId);
+    await refreshAll();
+  } catch (err) {
+    alert(err.message);
+  }
+});
 
 document.getElementById('detailSource').addEventListener('change', (e) => {
   document.getElementById('detailFbGroup').classList.toggle('hidden', e.target.value !== 'facebook');
@@ -1304,6 +1924,7 @@ document.getElementById('saveDetails').addEventListener('click', async () => {
         source: source || null,
         facebook_profile_url: source === 'facebook' ? (document.getElementById('detailFbUrl').value || null) : null,
         interest_type: document.getElementById('detailInterest').value || null,
+        birthday: document.getElementById('detailBirthday').value || null,
         next_followup_at: followup ? new Date(followup).toISOString() : null
       })
     });
@@ -1326,14 +1947,78 @@ document.getElementById('interactionForm').addEventListener('submit', async (e) 
   await loadInteractions(activeProspectId);
 });
 
+const INTERACTION_LABELS = { message: 'Message', appel: 'Appel', rencontre: 'Rencontre', note: 'Note' };
+
+// Top of the detail panel: stage age + the last exchange, so the rep
+// knows where they left off without scrolling past the contact form.
+function renderDetailSummary(interactions) {
+  const p = activeProspect;
+  if (!p) return;
+  const stageLabel = STAGES.find(s => s.key === p.stage)?.label || p.stage;
+  const stageDays = Math.floor(daysSince(p.stage_updated_at));
+  const last = interactions[0];
+  document.getElementById('detailSummaryText').innerHTML = `
+    <p class="summary-stage">${escapeHtml(stageLabel)} <span>${stageDays < 1 ? "depuis aujourd'hui" : `depuis ${stageDays} j`}</span></p>
+    ${last
+      ? `<p class="summary-last-label">Dernier echange · ${escapeHtml(INTERACTION_LABELS[last.type] || last.type)} · ${escapeHtml(relativeTime(last.created_at))}</p>
+         <p class="summary-last">${escapeHtml(last.content)}</p>`
+      : `<p class="summary-last-label">Aucun echange enregistre pour l'instant.</p>`}
+  `;
+}
+
+function renderTemperaturePicker(value) {
+  document.querySelectorAll('#detailTemperature [data-temperature]').forEach(b => {
+    b.classList.toggle('active', b.dataset.temperature === value);
+  });
+}
+
+// The rep's gut feeling about the contact, one tap; tapping the active one
+// again clears it.
+document.getElementById('detailTemperature').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-temperature]');
+  if (!btn || !activeProspect) return;
+  const value = activeProspect.temperature === btn.dataset.temperature ? null : btn.dataset.temperature;
+  renderTemperaturePicker(value);
+  try {
+    const updated = await api(`/api/prospects/${activeProspectId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ temperature: value })
+    });
+    activeProspect = { ...activeProspect, ...updated };
+    await refreshAll();
+  } catch (err) {
+    alert(err.message);
+    renderTemperaturePicker(activeProspect.temperature);
+  }
+});
+
+// Saved as soon as it's changed: planning the next step is the main thing
+// done on this screen, it shouldn't need the "Enregistrer les coordonnees"
+// button hidden inside the folded contact details.
+document.getElementById('detailFollowup').addEventListener('change', async (e) => {
+  const value = e.target.value;
+  try {
+    const updated = await api(`/api/prospects/${activeProspectId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ next_followup_at: value ? new Date(value).toISOString() : null })
+    });
+    activeProspect = { ...activeProspect, ...updated };
+    await syncFollowupNotification(updated);
+    await refreshAll();
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
 async function loadInteractions(id) {
   const items = await api(`/api/prospects/${id}/interactions`);
+  renderDetailSummary(items);
   const list = document.getElementById('interactionsList');
   list.innerHTML = items.length === 0
     ? `<p style="color:var(--text-faint); font-size:12px;">Aucune interaction enregistree</p>`
     : items.map(i => `
         <div class="interaction-item">
-          <span class="itype">${i.type}</span>
+          <span class="itype">${escapeHtml(INTERACTION_LABELS[i.type] || i.type)}</span>
           <span class="itime">${formatDateTime(i.created_at)}</span>
           <p>${escapeHtml(i.content)}</p>
         </div>
@@ -1371,26 +2056,38 @@ document.getElementById('deleteBtn').addEventListener('click', async () => {
 // ============================================
 // MODAL CLOSE HELPERS
 // ============================================
+// Modals can stack (detail -> message -> templates), so closing one —
+// close button, backdrop click or Escape — only closes that one (Escape:
+// the topmost, i.e. the last open overlay in the DOM).
 const subscriptionModal = document.getElementById('subscriptionModal');
 document.querySelectorAll('[data-close]').forEach(btn => {
-  btn.addEventListener('click', () => {
-    addModal.classList.add('hidden');
-    detailModal.classList.add('hidden');
-    importModal.classList.add('hidden');
-    subscriptionModal.classList.add('hidden');
-  });
+  btn.addEventListener('click', () => btn.closest('.modal-overlay').classList.add('hidden'));
 });
-[addModal, detailModal, importModal, subscriptionModal].forEach(m => {
+document.querySelectorAll('.modal-overlay').forEach(m => {
   m.addEventListener('click', (e) => { if (e.target === m) m.classList.add('hidden'); });
 });
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') { addModal.classList.add('hidden'); detailModal.classList.add('hidden'); importModal.classList.add('hidden'); subscriptionModal.classList.add('hidden'); }
+  if (e.key !== 'Escape') return;
+  const open = [...document.querySelectorAll('.modal-overlay')].filter(m => !m.classList.contains('hidden'));
+  if (open.length) open[open.length - 1].classList.add('hidden');
 });
 
 // Prefill (never the password) so returning to the login screen doesn't
 // mean retyping the phone number every time.
 const rememberedPhone = localStorage.getItem('lastLoginPhone');
 if (rememberedPhone) document.querySelector('#loginForm input[name="phone"]').value = rememberedPhone;
+
+// Price on the sign-up pitch (public endpoint, no login needed). Stays
+// hidden when no price is configured or the server can't be reached.
+(async function loadAuthPrice() {
+  try {
+    const info = await api('/api/subscription/info');
+    if (!info.price) return;
+    const el = document.getElementById('authPrice');
+    el.innerHTML = `<strong>${escapeHtml(info.price)}</strong>Acces complet pendant ${escapeHtml(String(info.duration_days))} jours, sans engagement.`;
+    el.classList.remove('hidden');
+  } catch { /* optional — the pitch reads fine without a price */ }
+})();
 
 // ============================================
 // INIT: check for an existing session before showing either screen

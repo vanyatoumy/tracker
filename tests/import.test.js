@@ -135,3 +135,21 @@ test('import: unauthenticated requests are rejected', async () => {
     const res = await client.post('/api/prospects/import', { rows: [] });
     assert.equal(res.status, 401);
 });
+
+test('import: the Google "Birthday" column is kept (missing year -> 1904 placeholder, junk ignored)', async () => {
+    const phone = '+237600444099';
+    db.createUser({ name: 'Birthdays', phone, password: PASSWORD });
+    db.setUserActive(phone, true);
+    const client = await loginAs(phone);
+
+    const rows = [
+        { 'First Name': 'Full', 'Last Name': 'Date', 'Phone 1 - Value': '+237677555001', Birthday: '1990-05-14' },
+        { 'First Name': 'No', 'Last Name': 'Year', 'Phone 1 - Value': '+237677555002', Birthday: '--02-29' },
+        { 'First Name': 'Bad', 'Last Name': 'Date', 'Phone 1 - Value': '+237677555003', Birthday: '1990-02-30' },
+        { 'First Name': 'None', 'Last Name': 'Given', 'Phone 1 - Value': '+237677555004' }
+    ];
+    assert.equal((await client.post('/api/prospects/import', { rows })).body.imported, 4);
+
+    const byName = Object.fromEntries((await client.get('/api/prospects')).body.map(p => [p.name, p.birthday]));
+    assert.deepEqual(byName, { 'Full Date': '1990-05-14', 'No Year': '1904-02-29', 'Bad Date': null, 'None Given': null });
+});

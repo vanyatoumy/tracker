@@ -65,4 +65,30 @@ function isoDate(value, field, opts = {}) {
     return v;
 }
 
-module.exports = { str, phone, url, oneOf, isoDate };
+// Same undefined / null-clears convention as the others. Accepts numeric
+// strings too, since HTML number inputs often end up sent as text.
+function number(value, field, { min = -Infinity, max = Infinity, integer = false } = {}) {
+    if (value === undefined) return undefined;
+    if (value === null || value === '') return null;
+    const n = typeof value === 'string' ? Number(value.trim()) : value;
+    if (typeof n !== 'number' || !Number.isFinite(n) || (integer && !Number.isInteger(n))) {
+        throw new ValidationError(`${field} doit etre un nombre${integer ? ' entier' : ''}`);
+    }
+    if (n < min || n > max) throw new ValidationError(`${field} doit etre entre ${min} et ${max}`);
+    return n;
+}
+
+// A calendar date with no time: 'YYYY-MM-DD', and a real one (no 02-30).
+function dateOnly(value, field) {
+    const v = str(value, field, { maxLength: 10 });
+    if (v === undefined) return undefined;
+    if (!v) return null;
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+    const d = m && new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+    if (!d || d.getUTCMonth() !== +m[2] - 1 || d.getUTCDate() !== +m[3]) {
+        throw new ValidationError(`${field} doit etre une date au format AAAA-MM-JJ`);
+    }
+    return v;
+}
+
+module.exports = { str, phone, url, oneOf, isoDate, number, dateOnly };

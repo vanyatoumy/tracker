@@ -38,12 +38,11 @@ async function startServer() {
 
 async function stopServer() {
     if (server) await new Promise((resolve) => server.close(resolve));
-    // Best-effort cleanup: on Windows, SQLite can briefly hold the file
-    // handle open past the last query (no explicit close() is exposed by
-    // db.js), so an immediate unlink can race with the OS releasing the
-    // lock. That's fine — each test file uses a unique random filename, so
-    // a leftover file here is just a small amount of disk usage, not a
-    // correctness problem for other test runs.
+    // Close the connection first: on Windows an open SQLite handle keeps the
+    // file locked, and the unlink below used to fail silently, leaving a
+    // .tmp-*.db behind after every test file. Still best-effort — a
+    // leftover file is just disk usage, not a problem for other runs.
+    require('../db').close();
     for (const suffix of ['', '.backup', '-wal', '-shm']) {
         try {
             fs.rmSync(TEST_DB_PATH + suffix, { force: true });

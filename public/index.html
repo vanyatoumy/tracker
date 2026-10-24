@@ -12,6 +12,26 @@
 
 <!-- ============ AUTH SCREEN ============ -->
 <div id="authScreen" class="auth-screen">
+  <!-- What the tool does and what it costs, before anyone is asked to
+       create an account. Price block filled from /api/subscription/info. -->
+  <aside class="auth-pitch">
+    <h2>Ton suivi de prospection, enfin sous controle</h2>
+    <p class="auth-pitch-sub">L'outil pense pour les distributeurs en marketing de reseau.</p>
+    <ul class="auth-benefits">
+      <li><strong>Ta liste du jour</strong> — qui relancer, qui rappeler, qui fete son anniversaire.</li>
+      <li><strong>WhatsApp en un clic</strong> — avec tes messages types, note automatiquement dans l'historique.</li>
+      <li><strong>Ton pipeline sur ton telephone</strong> — de la liste de noms au partenariat, meme sans reseau.</li>
+      <li><strong>Les reachats de tes clients</strong> — rappeles au bon moment, pour un revenu qui revient.</li>
+      <li><strong>Tes stats d'activite</strong> — ton objectif de la semaine et ton entonnoir de conversion.</li>
+    </ul>
+    <div id="authPrice" class="auth-price hidden"></div>
+    <ol class="auth-steps">
+      <li>Cree ton compte</li>
+      <li>Regle l'abonnement</li>
+      <li>Ton compte est active, c'est parti</li>
+    </ol>
+  </aside>
+
   <div class="auth-card">
     <div class="brand-mark large">SP</div>
     <h1 class="auth-title">Suivi Prospection</h1>
@@ -71,7 +91,8 @@
     </div>
   </div>
   <nav class="tabs">
-    <button class="tab-btn active" data-view="board">Pipeline</button>
+    <button class="tab-btn active" data-view="today">Aujourd'hui</button>
+    <button class="tab-btn" data-view="board">Pipeline</button>
     <button class="tab-btn" data-view="stats">Statistiques</button>
     <button class="tab-btn" data-view="archived">Archives</button>
     <button class="tab-btn hidden" id="adminTabBtn" data-view="admin" data-requires-online>Admin</button>
@@ -79,7 +100,7 @@
   <div class="topbar-right">
     <span id="currentUserInfo" class="current-user-info"></span>
     <span id="offlineStatus" class="offline-status hidden"></span>
-    <div class="menu-wrap" id="filterBar">
+    <div class="menu-wrap hidden" id="filterBar">
       <button id="filterMenuBtn" class="btn-icon" title="Recherche et filtres" aria-haspopup="true" aria-expanded="false">
         <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg></span><span id="filterBadge" class="icon-badge hidden">0</span>
       </button>
@@ -93,6 +114,12 @@
           <option value="produit">Produit</option>
           <option value="opportunite">Opportunite</option>
           <option value="indecis">Indecis</option>
+        </select>
+        <select id="filterTemperature">
+          <option value="">Toutes les temperatures</option>
+          <option value="chaud">Chaud</option>
+          <option value="tiede">Tiede</option>
+          <option value="froid">Froid</option>
         </select>
         <select id="filterCountry">
           <option value="">Tous les pays</option>
@@ -114,6 +141,7 @@
       <button id="moreMenuBtn" class="btn-icon" title="Plus d'options" aria-haspopup="true" aria-expanded="false"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg></span></button>
       <div id="moreMenu" class="dropdown-menu hidden">
         <button id="importBtn" class="dropdown-item" data-requires-online>Importer des contacts</button>
+        <button id="templatesBtn" class="dropdown-item">Mes modeles de message</button>
         <button id="subscriptionBtn" class="dropdown-item">Mon abonnement</button>
         <button id="logoutBtn" class="dropdown-item dropdown-item-danger">Deconnexion</button>
       </div>
@@ -122,8 +150,14 @@
 </header>
 
 <main>
+  <!-- TODAY VIEW (default): what to do today, built by planning.js -->
+  <section id="todayView" class="view">
+    <div id="todayContent" class="today"></div>
+  </section>
+
   <!-- BOARD VIEW -->
-  <section id="boardView" class="view">
+  <section id="boardView" class="view hidden">
+    <div class="stage-tabs" id="stageTabs"><!-- mobile only, see renderStageTabs --></div>
     <div class="board" id="board">
       <!-- columns injected by app.js -->
     </div>
@@ -131,6 +165,22 @@
 
   <!-- STATS VIEW -->
   <section id="statsView" class="view hidden">
+    <div class="period-chips" id="statsPeriod">
+      <button data-days="7">7 jours</button>
+      <button data-days="30">30 jours</button>
+      <button data-days="90">90 jours</button>
+      <button data-days="">Tout</button>
+    </div>
+
+    <h2 class="section-title">Ton activite</h2>
+    <div id="goalCard" class="goal-card"></div>
+    <div class="stats-grid activity-grid" id="activityGrid"></div>
+
+    <h2 class="section-title">Entonnoir</h2>
+    <p class="section-hint">Sur les contacts ajoutes pendant la periode : combien ont atteint chaque etape.</p>
+    <div id="funnel" class="funnel"></div>
+
+    <h2 class="section-title" style="margin-top:28px;">Temps de conversion</h2>
     <div class="stats-grid">
       <div class="stat-card highlight">
         <p class="stat-label">Temps median avant conversion</p>
@@ -152,7 +202,7 @@
     </div>
 
     <h2 class="section-title">Repartition par pays</h2>
-    <p class="section-hint">Pour savoir ou se trouve ton downline en dehors du Cameroun.</p>
+    <p class="section-hint">Ou se trouvent tes contacts (ajoutes pendant la periode).</p>
     <div class="table-wrap">
       <table id="countryTable">
         <thead>
@@ -309,6 +359,7 @@
         <p class="detail-sub" id="detailSub">—</p>
       </div>
       <div class="modal-header-actions">
+        <button id="detailTemplateBtn" class="btn-ghost hidden" title="Envoyer un message type sur WhatsApp">Message type</button>
         <a id="detailWaBtn" class="btn-whatsapp hidden" href="#" target="_blank" rel="noopener" title="Contacter sur WhatsApp"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"/></svg></span> <span class="btn-label">Contacter sur WhatsApp</span></a>
         <button class="modal-close" data-close><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></span></button>
       </div>
@@ -319,7 +370,64 @@
         <div class="stage-actions" id="stageActions"></div>
         <select id="stageSelectMobile" class="stage-select-mobile"></select>
 
-        <h3>Coordonnees</h3>
+        <!-- What a rep needs first: where things stand, what was said last,
+             what's next. Filled by renderDetailSummary(). -->
+        <div class="detail-summary">
+          <div id="detailSummaryText"></div>
+          <div class="summary-controls">
+            <label class="summary-followup">Prochaine relance
+              <input type="datetime-local" id="detailFollowup">
+            </label>
+            <div class="temperature-picker">
+              <span class="temperature-label">Temperature</span>
+              <div class="temperature-options" id="detailTemperature">
+                <button type="button" data-temperature="froid">Froid</button>
+                <button type="button" data-temperature="tiede">Tiede</button>
+                <button type="button" data-temperature="chaud">Chaud</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <h3>Ajouter une interaction</h3>
+        <form id="interactionForm">
+          <select name="type">
+            <option value="message">Message</option>
+            <option value="appel">Appel</option>
+            <option value="rencontre">Rencontre</option>
+            <option value="note">Note</option>
+          </select>
+          <textarea name="content" placeholder="Ce qui a ete dit / observe..." required></textarea>
+          <button type="submit" class="btn-primary">Enregistrer l'interaction</button>
+        </form>
+
+        <h3>Historique des interactions</h3>
+        <div id="interactionsList" class="interactions-list"></div>
+
+        <!-- Shown for client / partenaire contacts (see openDetail) -->
+        <div id="purchasesSection" class="hidden">
+          <h3>Achats</h3>
+          <div class="field-row reorder-row">
+            <label>Rappel de reachat tous les
+              <div class="inline-input">
+                <input type="number" id="reorderInterval" min="1" max="365" step="1" placeholder="ex: 30">
+                <span>jours</span>
+              </div>
+            </label>
+            <p id="reorderNext" class="reorder-next"></p>
+          </div>
+          <form id="purchaseForm" class="purchase-form">
+            <input type="date" name="purchased_at" required aria-label="Date d'achat">
+            <input type="text" name="product" placeholder="Produit(s)" maxlength="200">
+            <input type="number" name="amount" placeholder="Montant" min="0" step="any">
+            <button type="submit" class="btn-primary">Ajouter l'achat</button>
+          </form>
+          <div id="purchasesList" class="purchases-list"></div>
+        </div>
+
+        <!-- Contact details: needed now and then, not on every visit — folded. -->
+        <details class="detail-coords">
+        <summary>Coordonnees</summary>
         <div class="field-row">
           <label style="flex:1">Nom
             <input type="text" id="detailNameInput">
@@ -354,8 +462,8 @@
           <label style="flex:1">Quartier
             <input type="text" id="detailQuarter">
           </label>
-          <label style="flex:1">Prochaine relance
-            <input type="datetime-local" id="detailFollowup">
+          <label style="flex:1">Anniversaire
+            <input type="date" id="detailBirthday">
           </label>
         </div>
         <div class="two-col">
@@ -366,6 +474,8 @@
               <option value="facebook">Facebook</option>
               <option value="instagram">Instagram</option>
               <option value="whatsapp_status">Statut WhatsApp</option>
+              <option value="annuaire_telephonique">Annuaire téléphonique</option>
+              <option value="groupe_whatsapp">Groupe whatsapp</option>
               <option value="evenement">Evenement</option>
               <option value="approche_directe">Approche directe</option>
               <option value="autre">Autre</option>
@@ -383,30 +493,70 @@
           <input type="url" id="detailFbUrl" placeholder="https://facebook.com/...">
         </label>
         <button id="saveDetails" class="btn-primary full">Enregistrer les coordonnees</button>
-
-        <h3>Ajouter une interaction</h3>
-        <form id="interactionForm">
-          <select name="type">
-            <option value="message">Message</option>
-            <option value="appel">Appel</option>
-            <option value="rencontre">Rencontre</option>
-            <option value="note">Note</option>
-          </select>
-          <textarea name="content" placeholder="Ce qui a ete dit / observe..." required></textarea>
-          <button type="submit" class="btn-primary">Enregistrer l'interaction</button>
-        </form>
-
-        <h3>Historique des interactions</h3>
-        <div id="interactionsList" class="interactions-list"></div>
+        </details>
       </div>
 
       <div class="detail-side">
         <h3>Chronologie des etapes</h3>
         <div id="historyTimeline" class="history-timeline"></div>
 
-        <button id="archiveBtn" class="btn-danger full">Marquer comme perdu</button>
-        <button id="deleteBtn" class="btn-danger full btn-delete">Supprimer definitivement</button>
+        <!-- Rarely needed and hard to undo: kept out of the way, one tap
+             to reveal, instead of being the most visible red buttons. -->
+        <details class="danger-zone">
+          <summary>Autres actions</summary>
+          <button id="archiveBtn" class="btn-danger full">Marquer comme perdu</button>
+          <button id="deleteBtn" class="btn-danger full btn-delete">Supprimer definitivement</button>
+        </details>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- SEND TEMPLATED MESSAGE MODAL -->
+<div id="messageModal" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="messageModalTitle">Message WhatsApp</h2>
+      <button class="modal-close" data-close><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></span></button>
+    </div>
+    <div class="message-body">
+      <div id="messageTemplateChoices" class="template-choices"></div>
+      <label>Message (modifiable avant l'envoi)
+        <textarea id="messageText" rows="6" placeholder="Choisis un modele ou ecris ton message..."></textarea>
+      </label>
+      <div class="modal-actions spread">
+        <button id="messageManageBtn" class="btn-ghost" type="button">Gerer les modeles</button>
+        <button id="messageSendBtn" class="btn-primary" type="button">Ouvrir WhatsApp</button>
+      </div>
+      <p class="section-hint">Le message est note dans l'historique du contact quand tu ouvres WhatsApp.</p>
+    </div>
+  </div>
+</div>
+
+<!-- MANAGE TEMPLATES MODAL -->
+<div id="templatesModal" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>Mes modeles de message</h2>
+      <button class="modal-close" data-close><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></span></button>
+    </div>
+    <div class="templates-body">
+      <div id="templatesList" class="templates-list"></div>
+      <form id="templateForm" class="template-form">
+        <h3 id="templateFormTitle">Nouveau modele</h3>
+        <input type="hidden" name="id">
+        <label>Nom
+          <input type="text" name="name" required maxlength="80" placeholder="ex: Premier contact">
+        </label>
+        <label>Texte
+          <textarea name="body" required maxlength="1000" rows="5" placeholder="Bonjour {prenom}, c'est {moi}. Je pense a toi pour..."></textarea>
+        </label>
+        <p class="section-hint">Variables : <code>{prenom}</code> <code>{nom}</code> <code>{ville}</code> <code>{moi}</code> (ton prenom).</p>
+        <div class="modal-actions spread">
+          <button type="button" id="templateCancelEdit" class="btn-ghost hidden">Annuler la modification</button>
+          <button type="submit" class="btn-primary">Enregistrer le modele</button>
+        </div>
+      </form>
     </div>
   </div>
 </div>
@@ -416,6 +566,7 @@
 <script src="countries.js"></script>
 <script src="env.js"></script>
 <script src="offline.js"></script>
+<script src="planning.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

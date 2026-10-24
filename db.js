@@ -11,6 +11,14 @@ fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
 const db = new DatabaseSync(DB_PATH);
 db.exec('PRAGMA foreign_keys = ON;');
+// WAL: readers don't block on a writer (or on a backup's VACUUM INTO) and
+// vice versa. busy_timeout: when another connection (a CLI script, the
+// backup job) holds the write lock, wait up to 5s instead of failing
+// straight away with SQLITE_BUSY. Note that with WAL, recent writes may sit
+// in tracker.db-wal until the next checkpoint — copy the database with
+// scripts/backup.js (VACUUM INTO), not by copying the .db file alone.
+db.exec('PRAGMA journal_mode = WAL;');
+db.exec('PRAGMA busy_timeout = 5000;');
 
 // ============================================
 // SCHEMA
@@ -67,6 +75,9 @@ CREATE INDEX IF NOT EXISTS idx_prospects_stage ON prospects(stage);
 CREATE INDEX IF NOT EXISTS idx_prospects_archived ON prospects(is_archived);
 CREATE INDEX IF NOT EXISTS idx_prospects_followup ON prospects(next_followup_at);
 CREATE INDEX IF NOT EXISTS idx_prospects_country ON prospects(country);
+-- The board / today list query: one owner's active contacts, newest stage
+-- change first — served by this index alone, no separate sort.
+CREATE INDEX IF NOT EXISTS idx_prospects_owner_active ON prospects(owner_id, is_archived, stage_updated_at);
 
 CREATE TABLE IF NOT EXISTS stage_history (
     id              TEXT PRIMARY KEY,
@@ -91,6 +102,36 @@ CREATE TABLE IF NOT EXISTS interactions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_interactions_prospect ON interactions(prospect_id);
+
+-- Reusable WhatsApp message texts, per user. Variables like {prenom} are
+-- filled in client-side when the message is sent (see app.js).
+CREATE TABLE IF NOT EXISTS message_templates (
+    id              TEXT PRIMARY KEY,
+    owner_id        TEXT NOT NULL,
+    name            TEXT NOT NULL,
+    body            TEXT NOT NULL,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_message_templates_owner ON message_templates(owner_id);
+
+-- What a client bought and when. Drives the reorder reminder: the next
+-- reorder is due reorder_interval_days (on the prospect) after the latest
+-- purchase.
+CREATE TABLE IF NOT EXISTS purchases (
+    id              TEXT PRIMARY KEY,
+    prospect_id     TEXT NOT NULL,
+    purchased_at    TEXT NOT NULL,
+    product         TEXT,
+    amount          REAL,
+    note            TEXT,
+    created_at      TEXT NOT NULL,
+    FOREIGN KEY (prospect_id) REFERENCES prospects(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_purchases_prospect ON purchases(prospect_id);
 
 -- Failed-login tracking per (account, client IP). Locking per account alone
 -- let anyone who knew a phone number keep its owner locked out forever just
@@ -143,6 +184,10 @@ END;
     if (!cols.includes('subscription_expires_at')) {
         db.exec(`ALTER TABLE users ADD COLUMN subscription_expires_at TEXT;`);
     }
+    if (!cols.includes('weekly_goal')) {
+        // Target number of actions (messages, calls, meetings) per week; NULL = no goal set.
+        db.exec(`ALTER TABLE users ADD COLUMN weekly_goal INTEGER;`);
+    }
 })();
 
 (function migrateProspectColumns() {
@@ -150,12 +195,33 @@ END;
     if (!cols.includes('alt_phone')) {
         db.exec(`ALTER TABLE prospects ADD COLUMN alt_phone TEXT;`);
     }
+    if (!cols.includes('reorder_interval_days')) {
+        // NULL = no reorder reminder for this contact.
+        db.exec(`ALTER TABLE prospects ADD COLUMN reorder_interval_days INTEGER;`);
+    }
+    if (!cols.includes('birthday')) {
+        // 'YYYY-MM-DD' (the year may be a placeholder; only month/day drive the reminder).
+        db.exec(`ALTER TABLE prospects ADD COLUMN birthday TEXT;`);
+    }
+    if (!cols.includes('client_ref')) {
+        // Idempotency key for creates replayed from the mobile offline queue
+        // (its temporary "offline-..." id) — see createProspect.
+        db.exec(`ALTER TABLE prospects ADD COLUMN client_ref TEXT;`);
+    }
+    if (!cols.includes('temperature')) {
+        // How warm the rep feels the contact is: 'froid' | 'tiede' | 'chaud' | NULL.
+        // Validated in server.js rather than a CHECK, which ALTER TABLE can't add.
+        db.exec(`ALTER TABLE prospects ADD COLUMN temperature TEXT;`);
+    }
+    // Created here, after the column is guaranteed to exist on old databases.
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_prospects_client_ref ON prospects(owner_id, client_ref) WHERE client_ref IS NOT NULL;`);
 })();
 
 const STAGES = ['nouveau', 'contacte', 'prospect', 'interesse', 'en_decision', 'client', 'partenaire'];
 const FAILED_LOGIN_LOCK_THRESHOLD = 4; // lock the account after this many consecutive failures
 const LOCKOUT_DURATION_MIN = 15;
 const INTEREST_TYPES = ['produit', 'opportunite', 'indecis'];
+const TEMPERATURES = ['froid', 'tiede', 'chaud'];
 const INTERACTION_TYPES = ['appel', 'message', 'rencontre', 'note'];
 
 function now() {
@@ -204,7 +270,7 @@ function findUserByPhone(phone) {
 }
 
 function getUserById(id) {
-    return db.prepare(`SELECT id, name, phone, is_active, is_admin, subscription_expires_at, created_at FROM users WHERE id = ?`).get(id);
+    return db.prepare(`SELECT id, name, phone, is_active, is_admin, subscription_expires_at, weekly_goal, created_at FROM users WHERE id = ?`).get(id);
 }
 
 function listAllUsers() {
@@ -366,6 +432,10 @@ function createSession(userId) {
         INSERT INTO sessions (token, user_id, created_at, expires_at)
         VALUES (?, ?, ?, ?)
     `).run(token, userId, ts, expires);
+    // getSession() only removes an expired session if its token is used
+    // again, which a lost phone or a cleared browser never does — sweep the
+    // rest here, once per login, so the table doesn't grow forever.
+    db.prepare(`DELETE FROM sessions WHERE expires_at < ?`).run(ts);
     return { token, expires_at: expires };
 }
 
@@ -390,7 +460,16 @@ function deleteSessionsForUser(userId) {
 // ============================================
 // PROSPECTS
 // ============================================
-function createProspect(ownerId, { name, phone, alt_phone, country, city, quarter, facebook_profile_url, source, interest_type, next_followup_at }) {
+// client_ref (optional): set by the mobile app when replaying a contact
+// created offline. If the server already created it — the response was lost
+// on a flaky connection, so the phone retries — the existing contact is
+// returned instead of creating a duplicate.
+function createProspect(ownerId, { name, phone, alt_phone, country, city, quarter, facebook_profile_url, source, interest_type, next_followup_at, client_ref }) {
+    if (client_ref) {
+        const existing = db.prepare(`SELECT id FROM prospects WHERE owner_id = ? AND client_ref = ?`).get(ownerId, client_ref);
+        if (existing) return getProspect(ownerId, existing.id);
+    }
+
     const id = randomUUID();
     const ts = now();
 
@@ -401,10 +480,10 @@ function createProspect(ownerId, { name, phone, alt_phone, country, city, quarte
     try {
         db.prepare(`
             INSERT INTO prospects (id, owner_id, name, phone, alt_phone, country, city, quarter, facebook_profile_url, stage, stage_updated_at,
-                                    source, interest_type, is_archived, next_followup_at, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'nouveau', ?, ?, ?, 0, ?, ?, ?)
+                                    source, interest_type, is_archived, next_followup_at, client_ref, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'nouveau', ?, ?, ?, 0, ?, ?, ?, ?)
         `).run(id, ownerId, name, phone || null, alt_phone || null, country || null, city || null, quarter || null, facebook_profile_url || null,
-               ts, source || null, interest_type || null, next_followup_at || null, ts, ts);
+               ts, source || null, interest_type || null, next_followup_at || null, client_ref || null, ts, ts);
 
         db.prepare(`
             INSERT INTO stage_history (id, prospect_id, from_stage, to_stage, changed_at, note)
@@ -458,9 +537,9 @@ function bulkImportProspects(ownerId, contacts) {
             const ts = now();
             db.prepare(`
                 INSERT INTO prospects (id, owner_id, name, phone, alt_phone, country, city, quarter, facebook_profile_url, stage, stage_updated_at,
-                                        source, interest_type, is_archived, next_followup_at, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 'nouveau', ?, ?, NULL, 0, NULL, ?, ?)
-            `).run(id, ownerId, c.name, c.phone, altPhone, c.country || null, ts, c.source || null, ts, ts);
+                                        source, interest_type, is_archived, next_followup_at, birthday, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 'nouveau', ?, ?, NULL, 0, NULL, ?, ?, ?)
+            `).run(id, ownerId, c.name, c.phone, altPhone, c.country || null, ts, c.source || null, c.birthday || null, ts, ts);
 
             db.prepare(`
                 INSERT INTO stage_history (id, prospect_id, from_stage, to_stage, changed_at, note)
@@ -480,8 +559,21 @@ function bulkImportProspects(ownerId, contacts) {
     return { imported, skipped_duplicate: skippedDuplicate };
 }
 
+// Every prospect read carries last_purchase_at, so the client can work out
+// reorder reminders from the prospect list alone — including offline, from
+// the cached list (see offline.js).
+const PROSPECT_COLUMNS = `prospects.*,
+    (SELECT MAX(purchased_at) FROM purchases WHERE purchases.prospect_id = prospects.id) AS last_purchase_at`;
+
 function getProspect(ownerId, id) {
-    return db.prepare(`SELECT * FROM prospects WHERE id = ? AND owner_id = ?`).get(id, ownerId);
+    return db.prepare(`SELECT ${PROSPECT_COLUMNS} FROM prospects WHERE id = ? AND owner_id = ?`).get(id, ownerId);
+}
+
+// "contains" pattern for LIKE ... ESCAPE '\': the user's own % and _ are
+// matched literally instead of acting as wildcards (a search for "_" used to
+// match everything).
+function containsPattern(text) {
+    return `%${String(text).replace(/[\\%_]/g, '\\$&')}%`;
 }
 
 // Filters: stage, source, interest_type, country, city, quarter (exact/partial match), search (name or phone), archived
@@ -504,24 +596,28 @@ function listProspects(ownerId, filters = {}) {
         clauses.push('interest_type = ?');
         params.push(filters.interest_type);
     }
+    if (filters.temperature) {
+        clauses.push('temperature = ?');
+        params.push(filters.temperature);
+    }
     if (filters.country) {
         clauses.push('country = ?');
         params.push(filters.country);
     }
     if (filters.city) {
-        clauses.push('city LIKE ?');
-        params.push(`%${filters.city}%`);
+        clauses.push(`city LIKE ? ESCAPE '\\'`);
+        params.push(containsPattern(filters.city));
     }
     if (filters.quarter) {
-        clauses.push('quarter LIKE ?');
-        params.push(`%${filters.quarter}%`);
+        clauses.push(`quarter LIKE ? ESCAPE '\\'`);
+        params.push(containsPattern(filters.quarter));
     }
     if (filters.search) {
-        clauses.push('(name LIKE ? OR phone LIKE ?)');
-        params.push(`%${filters.search}%`, `%${filters.search}%`);
+        clauses.push(`(name LIKE ? ESCAPE '\\' OR phone LIKE ? ESCAPE '\\')`);
+        params.push(containsPattern(filters.search), containsPattern(filters.search));
     }
 
-    const sql = `SELECT * FROM prospects WHERE ${clauses.join(' AND ')} ORDER BY stage_updated_at DESC`;
+    const sql = `SELECT ${PROSPECT_COLUMNS} FROM prospects WHERE ${clauses.join(' AND ')} ORDER BY stage_updated_at DESC`;
     return db.prepare(sql).all(...params);
 }
 
@@ -529,7 +625,7 @@ function updateProspect(ownerId, id, fields) {
     const existing = getProspect(ownerId, id);
     if (!existing) throw new NotFoundError('Contact introuvable');
 
-    const allowed = ['name', 'phone', 'alt_phone', 'country', 'city', 'quarter', 'facebook_profile_url', 'source', 'interest_type', 'next_followup_at'];
+    const allowed = ['name', 'phone', 'alt_phone', 'country', 'city', 'quarter', 'facebook_profile_url', 'source', 'interest_type', 'next_followup_at', 'reorder_interval_days', 'birthday', 'temperature'];
     const sets = [];
     const values = [];
     for (const key of allowed) {
@@ -552,6 +648,10 @@ function transitionStage(ownerId, id, toStage, note) {
     }
     const prospect = getProspect(ownerId, id);
     if (!prospect) throw new NotFoundError('Contact introuvable');
+    // "Moving" to the stage it's already in isn't a transition: recording it
+    // would add a no-op line to the timeline and reset stage_updated_at,
+    // making a stale contact look freshly active.
+    if (prospect.stage === toStage) return prospect;
 
     const ts = now();
     db.prepare(`
@@ -615,12 +715,73 @@ function getInteractions(ownerId, prospectId) {
 }
 
 // ============================================
+// PURCHASES (clients' orders — drive reorder reminders)
+// ============================================
+function getPurchases(ownerId, prospectId) {
+    const owned = getProspect(ownerId, prospectId);
+    if (!owned) throw new NotFoundError('Contact introuvable');
+    return db.prepare(`
+        SELECT * FROM purchases WHERE prospect_id = ? ORDER BY purchased_at DESC
+    `).all(prospectId);
+}
+
+function addPurchase(ownerId, prospectId, { purchased_at, product, amount, note }) {
+    const owned = getProspect(ownerId, prospectId);
+    if (!owned) throw new NotFoundError('Contact introuvable');
+    const id = randomUUID();
+    const ts = now();
+    db.prepare(`
+        INSERT INTO purchases (id, prospect_id, purchased_at, product, amount, note, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(id, prospectId, purchased_at || ts, product || null, amount ?? null, note || null, ts);
+    db.prepare(`UPDATE prospects SET updated_at = ? WHERE id = ?`).run(ts, prospectId);
+    return db.prepare(`SELECT * FROM purchases WHERE id = ?`).get(id);
+}
+
+function deletePurchase(ownerId, prospectId, purchaseId) {
+    const owned = getProspect(ownerId, prospectId);
+    if (!owned) throw new NotFoundError('Contact introuvable');
+    db.prepare(`DELETE FROM purchases WHERE id = ? AND prospect_id = ?`).run(purchaseId, prospectId);
+}
+
+// ============================================
+// MESSAGE TEMPLATES
+// ============================================
+function listTemplates(ownerId) {
+    return db.prepare(`SELECT * FROM message_templates WHERE owner_id = ? ORDER BY name COLLATE NOCASE ASC`).all(ownerId);
+}
+
+function createTemplate(ownerId, { name, body }) {
+    const id = randomUUID();
+    const ts = now();
+    db.prepare(`
+        INSERT INTO message_templates (id, owner_id, name, body, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+    `).run(id, ownerId, name, body, ts, ts);
+    return db.prepare(`SELECT * FROM message_templates WHERE id = ?`).get(id);
+}
+
+function updateTemplate(ownerId, id, fields) {
+    const existing = db.prepare(`SELECT * FROM message_templates WHERE id = ? AND owner_id = ?`).get(id, ownerId);
+    if (!existing) throw new NotFoundError('Modele introuvable');
+    const name = fields.name !== undefined ? fields.name : existing.name;
+    const body = fields.body !== undefined ? fields.body : existing.body;
+    db.prepare(`UPDATE message_templates SET name = ?, body = ?, updated_at = ? WHERE id = ? AND owner_id = ?`)
+        .run(name, body, now(), id, ownerId);
+    return db.prepare(`SELECT * FROM message_templates WHERE id = ?`).get(id);
+}
+
+function deleteTemplate(ownerId, id) {
+    db.prepare(`DELETE FROM message_templates WHERE id = ? AND owner_id = ?`).run(id, ownerId);
+}
+
+// ============================================
 // REMINDERS
 // ============================================
 function getDueReminders(ownerId) {
     const nowIso = now();
     return db.prepare(`
-        SELECT * FROM prospects
+        SELECT ${PROSPECT_COLUMNS} FROM prospects
         WHERE owner_id = ?
           AND is_archived = 0
           AND next_followup_at IS NOT NULL
@@ -632,16 +793,24 @@ function getDueReminders(ownerId) {
 // ============================================
 // STATS
 // ============================================
-function getConversionBenchmark(ownerId) {
+// One data point per converted contact, measured to its *first* conversion:
+// a contact who became client and later partenaire (or went back and forth)
+// has several client/partenaire rows in stage_history, and counting each one
+// both inflated the conversion count and skewed the median towards the
+// slower, later transitions.
+// `since` (ISO string or null) limits every stat below to a period: here,
+// conversions that happened within it.
+function getConversionBenchmark(ownerId, since = null) {
     const rows = db.prepare(`
         SELECT
             sh.prospect_id AS prospect_id,
-            sh.changed_at AS converted_at,
+            MIN(sh.changed_at) AS converted_at,
             (SELECT MIN(changed_at) FROM stage_history WHERE prospect_id = sh.prospect_id) AS started_at
         FROM stage_history sh
         JOIN prospects p ON p.id = sh.prospect_id
         WHERE sh.to_stage IN ('client', 'partenaire') AND p.owner_id = ?
-    `).all(ownerId);
+        GROUP BY sh.prospect_id
+    `).all(ownerId).filter(r => !since || r.converted_at >= since);
 
     const days = rows
         .map(r => (new Date(r.converted_at) - new Date(r.started_at)) / (1000 * 60 * 60 * 24))
@@ -663,17 +832,22 @@ function getConversionBenchmark(ownerId) {
     };
 }
 
-function getSourceStats(ownerId) {
+// Conversion rates count every contact ever added, archived ("Perdu") ones
+// included. Excluding archived non-converted contacts — as this used to —
+// removed exactly the failures from the denominator, so the rate went *up*
+// every time a contact was marked lost.
+// With a period, only contacts *added* within it count.
+function getSourceStats(ownerId, since = null) {
     const rows = db.prepare(`
         SELECT
             COALESCE(source, 'non_renseigne') AS source,
             COUNT(*) AS total,
             SUM(CASE WHEN stage IN ('client', 'partenaire') THEN 1 ELSE 0 END) AS converted
         FROM prospects
-        WHERE owner_id = ? AND (is_archived = 0 OR stage IN ('client', 'partenaire'))
+        WHERE owner_id = ? AND created_at >= ?
         GROUP BY COALESCE(source, 'non_renseigne')
         ORDER BY total DESC
-    `).all(ownerId);
+    `).all(ownerId, since || '');
 
     return rows.map(r => ({
         source: r.source,
@@ -681,6 +855,83 @@ function getSourceStats(ownerId) {
         converted: r.converted,
         conversion_rate: r.total > 0 ? Math.round((r.converted / r.total) * 1000) / 10 : 0
     }));
+}
+
+// Effort, not just results: what the rep *did* in the period (messages,
+// calls, new contacts, stage moves), what it produced (conversions,
+// revenue), and the funnel — how many of the contacts added in the period
+// reached each stage (a contact that went straight from "nouveau" to
+// "client" counts as having passed every stage in between).
+function getActivityStats(ownerId, since = null) {
+    const from = since || '';
+
+    const interactions = { message: 0, appel: 0, rencontre: 0, note: 0 };
+    for (const r of db.prepare(`
+        SELECT i.type, COUNT(*) AS n FROM interactions i
+        JOIN prospects p ON p.id = i.prospect_id
+        WHERE p.owner_id = ? AND i.created_at >= ?
+        GROUP BY i.type
+    `).all(ownerId, from)) interactions[r.type] = r.n;
+
+    const newContacts = db.prepare(`
+        SELECT COUNT(*) AS n FROM prospects WHERE owner_id = ? AND created_at >= ?
+    `).get(ownerId, from).n;
+
+    let stageAdvances = 0;
+    for (const r of db.prepare(`
+        SELECT sh.from_stage, sh.to_stage FROM stage_history sh
+        JOIN prospects p ON p.id = sh.prospect_id
+        WHERE p.owner_id = ? AND sh.from_stage IS NOT NULL AND sh.changed_at >= ?
+    `).all(ownerId, from)) {
+        if (STAGES.indexOf(r.to_stage) > STAGES.indexOf(r.from_stage)) stageAdvances++;
+    }
+
+    const revenue = db.prepare(`
+        SELECT COUNT(*) AS purchases, COALESCE(SUM(pu.amount), 0) AS total FROM purchases pu
+        JOIN prospects p ON p.id = pu.prospect_id
+        WHERE p.owner_id = ? AND pu.purchased_at >= ?
+    `).get(ownerId, from);
+
+    const furthest = new Map(); // prospect_id -> highest stage index ever reached
+    for (const r of db.prepare(`
+        SELECT sh.prospect_id, sh.to_stage FROM stage_history sh
+        JOIN prospects p ON p.id = sh.prospect_id
+        WHERE p.owner_id = ? AND p.created_at >= ?
+    `).all(ownerId, from)) {
+        const idx = STAGES.indexOf(r.to_stage);
+        if (idx > (furthest.get(r.prospect_id) ?? -1)) furthest.set(r.prospect_id, idx);
+    }
+    // client and partenaire are two outcomes, not two steps: the funnel's
+    // last step is "converted" (either one).
+    const FUNNEL = ['nouveau', 'contacte', 'prospect', 'interesse', 'en_decision', 'client'];
+    const funnel = FUNNEL.map((stage, i) => ({
+        stage: stage === 'client' ? 'converti' : stage,
+        count: [...furthest.values()].filter(idx => idx >= i).length
+    }));
+
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const lastSevenDays = db.prepare(`
+        SELECT COUNT(*) AS n FROM interactions i
+        JOIN prospects p ON p.id = i.prospect_id
+        WHERE p.owner_id = ? AND i.created_at >= ? AND i.type != 'note'
+    `).get(ownerId, weekAgo).n;
+
+    return {
+        interactions,
+        actions: interactions.message + interactions.appel + interactions.rencontre,
+        new_contacts: newContacts,
+        stage_advances: stageAdvances,
+        conversions: getConversionBenchmark(ownerId, since).count,
+        purchases: revenue.purchases,
+        revenue: revenue.total,
+        funnel,
+        last_7_days_actions: lastSevenDays
+    };
+}
+
+function setWeeklyGoal(userId, goal) {
+    db.prepare(`UPDATE users SET weekly_goal = ? WHERE id = ?`).run(goal, userId);
+    return getUserById(userId);
 }
 
 // ============================================
@@ -706,18 +957,19 @@ function backupTo(destPath) {
     return destPath;
 }
 
-// Country breakdown — answers "which countries is my downline actually in"
-function getCountryStats(ownerId) {
+// Country breakdown — answers "which countries is my downline actually in".
+// Same denominator as getSourceStats: archived contacts included.
+function getCountryStats(ownerId, since = null) {
     const rows = db.prepare(`
         SELECT
             COALESCE(country, 'non_renseigne') AS country,
             COUNT(*) AS total,
             SUM(CASE WHEN stage IN ('client', 'partenaire') THEN 1 ELSE 0 END) AS converted
         FROM prospects
-        WHERE owner_id = ? AND (is_archived = 0 OR stage IN ('client', 'partenaire'))
+        WHERE owner_id = ? AND created_at >= ?
         GROUP BY COALESCE(country, 'non_renseigne')
         ORDER BY total DESC
-    `).all(ownerId);
+    `).all(ownerId, since || '');
 
     return rows.map(r => ({
         country: r.country,
@@ -727,9 +979,17 @@ function getCountryStats(ownerId) {
     }));
 }
 
+// Only the test suite needs this (so Windows releases the temp DB file and
+// it can be deleted); the server keeps its connection for its lifetime.
+function close() {
+    try { db.close(); } catch { /* already closed */ }
+}
+
 module.exports = {
+    close,
     STAGES,
     INTEREST_TYPES,
+    TEMPERATURES,
     INTERACTION_TYPES,
     createUser,
     findUserByPhone,
@@ -762,9 +1022,18 @@ module.exports = {
     getStageHistory,
     addInteraction,
     getInteractions,
+    getPurchases,
+    addPurchase,
+    deletePurchase,
+    listTemplates,
+    createTemplate,
+    updateTemplate,
+    deleteTemplate,
     getDueReminders,
     getConversionBenchmark,
     getSourceStats,
     getCountryStats,
+    getActivityStats,
+    setWeeklyGoal,
     backupTo
 };

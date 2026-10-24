@@ -320,6 +320,23 @@ function parseOnePhone(raw) {
 // Pulls every raw phone string out of a Google Contacts row: any column
 // matching "Phone N - Value", each of which may itself contain multiple
 // numbers joined by ":::".
+// Google exports "1990-05-14", or "--05-14" when the year is unknown. Only
+// month/day drive the birthday reminder, so a missing year gets the
+// placeholder 1904 — obviously not a real birth year, and a leap year, so a
+// "--02-29" birthday stays a valid date when the contact is edited later.
+// Anything else (or an impossible date) is ignored.
+const UNKNOWN_BIRTH_YEAR = 1904;
+function parseGoogleBirthday(raw) {
+    const m = /^(\d{4}|--)-?(\d{2})-(\d{2})$/.exec(String(raw || '').trim());
+    if (!m) return null;
+    const year = m[1] === '--' ? UNKNOWN_BIRTH_YEAR : Number(m[1]);
+    const month = Number(m[2]);
+    const day = Number(m[3]);
+    const d = new Date(Date.UTC(year, month - 1, day));
+    if (d.getUTCMonth() !== month - 1 || d.getUTCDate() !== day) return null;
+    return `${year}-${m[2]}-${m[3]}`;
+}
+
 function collectRawGooglePhones(row) {
     const raws = [];
     for (const key of Object.keys(row)) {
@@ -428,6 +445,7 @@ function expandContactRows(rows) {
             phone: primary.phone,
             alt_phone: secondary ? secondary.phone : null,
             country: primary.country,
+            birthday: parseGoogleBirthday(row.Birthday),
             source: 'annuaire_telephonique'
         });
     }
