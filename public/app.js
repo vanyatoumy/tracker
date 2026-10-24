@@ -1364,6 +1364,28 @@ async function loadTemplates() {
   return messageTemplates;
 }
 
+// Starter pack (server side: db.STARTER_TEMPLATES) — offered wherever the
+// template list is empty, and in the getting-started card.
+const STARTER_PACK_BUTTON = `<button type="button" class="btn-primary" data-starter-pack>Ajouter les messages types</button>`;
+async function addStarterPack() {
+  await api('/api/templates/starter', { method: 'POST' });
+  await loadTemplates();
+  if (!messageModal.classList.contains('hidden')) await renderTemplateChoices();
+  if (!templatesModal.classList.contains('hidden')) await renderTemplatesList();
+}
+document.addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-starter-pack]');
+  if (!btn) return;
+  btn.disabled = true;
+  try {
+    await addStarterPack();
+    if (document.querySelector('.tab-btn.active')?.dataset.view === 'today') renderToday();
+  } catch (err) {
+    alert(err.message);
+    btn.disabled = false;
+  }
+});
+
 async function openMessageModal(prospect) {
   messageTarget = prospect;
   messageTemplateUsed = null;
@@ -1382,7 +1404,7 @@ async function renderTemplateChoices() {
     return;
   }
   container.innerHTML = messageTemplates.length === 0
-    ? `<p class="section-hint">Aucun modele pour l'instant. Cree ton premier avec « Gerer les modeles », ou ecris ton message directement.</p>`
+    ? `<div class="starter-pack-offer"><p class="section-hint">Aucun modele pour l'instant. Pars de nos messages types (tu pourras les modifier), ou ecris ton message directement.</p>${STARTER_PACK_BUTTON}</div>`
     : messageTemplates.map(t => `<button type="button" class="template-chip ${messageTemplateUsed && messageTemplateUsed.id === t.id ? 'active' : ''}" data-template="${escapeHtml(t.id)}">${escapeHtml(t.name)}</button>`).join('');
 }
 
@@ -1450,7 +1472,7 @@ async function renderTemplatesList() {
     return;
   }
   list.innerHTML = messageTemplates.length === 0
-    ? `<p class="section-hint">Aucun modele enregistre.</p>`
+    ? `<div class="starter-pack-offer"><p class="section-hint">Aucun modele enregistre. Commence avec nos 7 messages types (premier contact, invitation, relances, reachat, anniversaire…), puis adapte-les a ta facon de parler.</p>${STARTER_PACK_BUTTON}</div>`
     : messageTemplates.map(t => `
         <div class="template-item">
           <div class="template-item-main">

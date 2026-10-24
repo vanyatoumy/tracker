@@ -129,3 +129,20 @@ test('birthday and temperature: set, cleared, and validated', async () => {
     const cleared = await client.patch(`/api/prospects/${p.id}`, { birthday: '', temperature: null });
     assert.deepEqual({ b: cleared.body.birthday, t: cleared.body.temperature }, { b: null, t: null });
 });
+
+test('starter templates: added once, never duplicated, existing names kept as the user wrote them', async () => {
+    const client = await freshUser();
+    await client.post('/api/templates', { name: 'Anniversaire', body: 'Mon propre texte' });
+
+    const first = await client.post('/api/templates/starter');
+    assert.equal(first.status, 201);
+    assert.equal(first.body.length, 6, 'the 7-template pack minus the one the user already had');
+
+    const again = await client.post('/api/templates/starter');
+    assert.equal(again.body.length, 0);
+
+    const list = (await client.get('/api/templates')).body;
+    assert.equal(list.length, 7);
+    assert.equal(list.find(t => t.name === 'Anniversaire').body, 'Mon propre texte');
+    assert.ok(list.every(t => t.body.length > 0));
+});

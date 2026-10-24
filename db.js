@@ -815,6 +815,28 @@ function createTemplate(ownerId, { name, body }) {
     return db.prepare(`SELECT * FROM message_templates WHERE id = ?`).get(id);
 }
 
+// Starter pack offered to new users (a blank template list stops beginners
+// cold: "what do I even write?"). Plain, relationship-first wording — no
+// hype, nothing that reads like spam when it lands in someone's WhatsApp.
+const STARTER_TEMPLATES = [
+    { name: 'Premier contact', body: "Bonjour {prenom}, c'est {moi} ! Ça fait un moment, comment vas-tu ? J'ai pensé à toi récemment. Tu aurais 5 minutes cette semaine pour qu'on discute ?" },
+    { name: 'Invitation à une présentation', body: "Salut {prenom} ! Je fais une courte présentation (20 minutes) d'un projet qui me tient à cœur. J'aimerais beaucoup avoir ton avis, même si ce n'est pas pour toi. Tu serais disponible quand ?" },
+    { name: 'Relance après présentation', body: "Bonjour {prenom}, merci encore pour ton temps ! Qu'est-ce qui t'a le plus parlé ? Si tu as des questions, je suis là pour y répondre." },
+    { name: 'Relance douce', body: "Coucou {prenom}, je ne veux pas te déranger. Je reviens simplement vers toi suite à notre échange : tu as pu y réfléchir ?" },
+    { name: 'Bienvenue nouveau client', body: "Bienvenue {prenom} et merci pour ta confiance ! N'hésite pas à m'écrire pour toute question sur tes produits, je suis là pour t'accompagner." },
+    { name: 'Réachat', body: "Bonjour {prenom}, ton stock tient encore ? Je peux te préparer ta prochaine commande dès cette semaine." },
+    { name: 'Anniversaire', body: "Joyeux anniversaire {prenom} ! Je te souhaite une magnifique année, pleine de santé et de réussite. {moi}" }
+];
+
+// Adds the starter templates the user doesn't already have (matched by
+// name), so running it twice never duplicates anything.
+function addStarterTemplates(ownerId) {
+    const existing = new Set(listTemplates(ownerId).map(t => t.name.toLowerCase()));
+    return STARTER_TEMPLATES
+        .filter(t => !existing.has(t.name.toLowerCase()))
+        .map(t => createTemplate(ownerId, t));
+}
+
 function updateTemplate(ownerId, id, fields) {
     const existing = db.prepare(`SELECT * FROM message_templates WHERE id = ? AND owner_id = ?`).get(id, ownerId);
     if (!existing) throw new NotFoundError('Modele introuvable');
@@ -1084,6 +1106,7 @@ module.exports = {
     deletePurchase,
     listTemplates,
     createTemplate,
+    addStarterTemplates,
     updateTemplate,
     deleteTemplate,
     getDueReminders,

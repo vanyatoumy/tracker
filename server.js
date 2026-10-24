@@ -551,6 +551,13 @@ app.post('/api/templates', requireAuth, (req, res) => {
     } catch (err) { handleError(res, err); }
 });
 
+// Adds the built-in starter templates the user doesn't have yet.
+app.post('/api/templates/starter', requireAuth, (req, res) => {
+    try {
+        res.status(201).json(db.addStarterTemplates(req.userId));
+    } catch (err) { handleError(res, err); }
+});
+
 app.patch('/api/templates/:id', requireAuth, (req, res) => {
     try {
         const fields = {};
