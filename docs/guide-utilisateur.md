@@ -38,7 +38,12 @@ peut lever tous les blocages depuis l'espace Admin.
 ## 2. Aujourd'hui (écran d'accueil)
 
 C'est l'écran qui s'ouvre à la connexion : **qui contacter aujourd'hui**,
-du plus urgent au moins urgent. Un contact n'apparaît que dans une seule
+du plus urgent au moins urgent.
+
+**Bien démarrer** : sur un nouveau compte, une carte en haut de l'écran
+guide les trois premières étapes (ajouter ses contacts, préparer ses
+messages avec les **messages types** fournis, envoyer son premier message).
+Elle disparaît une fois les trois étapes faites, ou avec "Masquer". Un contact n'apparaît que dans une seule
 section, la plus urgente.
 
 - **Anniversaires** : les contacts dont c'est l'anniversaire aujourd'hui.

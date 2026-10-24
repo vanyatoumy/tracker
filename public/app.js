@@ -1246,8 +1246,92 @@ let todayProspects = [];
 async function loadToday({ fresh = false } = {}) {
   const filtered = Object.values(activeFilters).some(Boolean);
   todayProspects = (fresh || filtered) ? await api('/api/prospects') : currentProspects;
+  await loadOnboarding();
   renderToday();
 }
+
+// ---------- "Bien démarrer": getting-started card for new accounts ----------
+// Three steps (contacts, message templates, first message sent), shown at
+// the top of the Today view until all are done or the user hides it. Both
+// end states are remembered per device so the extra requests stop.
+let onboarding = null; // { contacts, templates, actions } while shown, else null
+function onboardingFlag(key, value) {
+  try {
+    if (value === undefined) return localStorage.getItem(key) === '1';
+    localStorage.setItem(key, '1');
+  } catch { /* per-device nicety only */ }
+  return false;
+}
+
+async function loadOnboarding() {
+  if (onboardingFlag('onboardingDone') || onboardingFlag('onboardingHidden')) { onboarding = null; return; }
+  let templates = 0;
+  let actions = 0;
+  try { templates = (await api('/api/templates')).length; } catch { /* unknown: not done */ }
+  try { actions = (await api('/api/stats/activity')).actions; } catch { /* offline: not done */ }
+  onboarding = { contacts: todayProspects.length, templates, actions };
+  if (onboarding.contacts > 0 && templates > 0 && actions > 0) {
+    onboardingFlag('onboardingDone', true);
+    onboarding = null;
+  }
+}
+
+function onboardingHtml() {
+  if (!onboarding) return '';
+  const steps = [
+    {
+      done: onboarding.contacts > 0,
+      title: 'Ajoute tes contacts',
+      text: 'Importe ton repertoire Google en une fois, ou ajoute tes contacts un par un.',
+      actions: `<button class="btn-primary" data-onboard="import">Importer mes contacts</button><button class="btn-ghost" data-onboard="add">Ajouter un contact</button>`
+    },
+    {
+      done: onboarding.templates > 0,
+      title: 'Prepare tes messages',
+      text: 'Des messages types prets a envoyer sur WhatsApp, que tu adaptes a ta facon de parler.',
+      actions: `${STARTER_PACK_BUTTON}<button class="btn-ghost" data-onboard="templates">Ecrire les miens</button>`
+    },
+    {
+      done: onboarding.actions > 0,
+      title: 'Envoie ton premier message',
+      text: 'Touche « Message » sur un contact de ta liste du jour : le message part sur WhatsApp et le contact passe a « Contacte ».',
+      actions: ''
+    }
+  ];
+  const doneCount = steps.filter(s => s.done).length;
+  return `
+    <section class="onboarding-card">
+      <div class="onboarding-head">
+        <h2 class="section-title">Bien demarrer <span class="today-count">${doneCount}/3</span></h2>
+        <button class="btn-ghost" data-onboard="hide">Masquer</button>
+      </div>
+      <ol class="onboarding-steps">
+        ${steps.map(s => `
+          <li class="${s.done ? 'done' : ''}">
+            <span class="onboarding-check">${s.done ? '✓' : ''}</span>
+            <div>
+              <strong>${s.title}</strong>
+              <p>${s.text}</p>
+              ${s.done || !s.actions ? '' : `<div class="onboarding-actions">${s.actions}</div>`}
+            </div>
+          </li>`).join('')}
+      </ol>
+    </section>`;
+}
+
+document.getElementById('todayContent').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-onboard]');
+  if (!btn) return;
+  switch (btn.dataset.onboard) {
+    case 'import': return document.getElementById('importBtn').click();
+    case 'add': return document.getElementById('addProspectBtn').click();
+    case 'templates': return openTemplatesModal();
+    case 'hide':
+      onboardingFlag('onboardingHidden', true);
+      onboarding = null;
+      return renderToday();
+  }
+});
 
 function todayItemDetail(sectionKey, item) {
   const p = item.prospect;
@@ -1276,7 +1360,7 @@ function renderToday() {
   const total = TODAY_SECTIONS.reduce((n, s) => n + sections[s.key].length, 0);
   const dateLabel = new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
 
-  let html = `
+  let html = onboardingHtml() + `
     <div class="today-header">
       <h2 class="section-title">${escapeHtml(dateLabel)}</h2>
       <p class="section-hint">${total === 0 ? "Rien d'urgent aujourd'hui. Profites-en pour ajouter de nouveaux contacts !" : `${total} contact${total > 1 ? 's' : ''} a traiter`}</p>
@@ -1379,7 +1463,7 @@ document.addEventListener('click', async (e) => {
   btn.disabled = true;
   try {
     await addStarterPack();
-    if (document.querySelector('.tab-btn.active')?.dataset.view === 'today') renderToday();
+    if (document.querySelector('.tab-btn.active')?.dataset.view === 'today') await loadToday();
   } catch (err) {
     alert(err.message);
     btn.disabled = false;

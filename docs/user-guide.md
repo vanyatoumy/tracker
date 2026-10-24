@@ -38,7 +38,12 @@ you from logging in. An admin can lift every lockout from the Admin area.
 ## 2. "Aujourd'hui" (Today — home screen)
 
 The screen that opens at login: **who to contact today**, most urgent
-first. A contact only appears in one section, the most urgent one.
+first.
+
+**Bien démarrer** (Getting started): on a new account, a card at the top
+guides the first three steps (add your contacts, prepare your messages
+with the provided **starter templates**, send your first message). It
+disappears once all three are done, or with "Masquer" (Hide). A contact only appears in one section, the most urgent one.
 
 - **Anniversaires** (Birthdays): contacts whose birthday is today.
 - **Relances en retard** (Overdue follow-ups): the planned follow-up date
