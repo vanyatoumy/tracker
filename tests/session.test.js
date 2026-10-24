@@ -53,18 +53,49 @@ test('deactivating from the CLI helper also cuts off open sessions', async () =>
     assert.equal(res.status, 401);
 });
 
-test('a subscription lapsing mid-session blocks the next request with the renewal message', async () => {
+function setExpiry(userId, msFromNow) {
+    // Separate connection to the same test DB.
+    const raw = new DatabaseSync(process.env.DB_PATH);
+    raw.prepare(`UPDATE users SET subscription_expires_at = ? WHERE id = ?`)
+        .run(new Date(Date.now() + msFromNow).toISOString(), userId);
+    raw.close();
+}
+const DAY = 24 * 60 * 60 * 1000;
+
+test('during the grace period after expiry the account is read-only, then cut off once it ends', async () => {
+    const phone = '+237600444006';
+    const user = makeActiveUser('Grace', phone);
+    const client = await loginAs(phone);
+    const created = await client.post('/api/prospects', { name: 'Avant expiration' });
+    assert.equal(created.status, 201);
+
+    setExpiry(user.id, -1 * DAY); // expired yesterday: inside the 3-day grace
+
+    assert.equal((await client.get('/api/prospects')).status, 200, 'reading still works');
+    assert.equal((await client.get('/api/auth/me')).status, 200);
+    const write = await client.post('/api/prospects', { name: 'Pendant la grace' });
+    assert.equal(write.status, 403);
+    assert.equal(write.body.code, 'subscription_grace');
+    assert.equal((await client.patch(`/api/prospects/${created.body.id}`, { city: 'Douala' })).status, 403);
+    assert.equal(db.getUserById(user.id).is_active, 1, 'not deactivated during the grace period');
+
+    // A fresh login during the grace period works too (read-only).
+    assert.equal((await makeClient().post('/api/auth/login', { phone, password: PASSWORD })).status, 200);
+
+    // Renewing restores writes immediately, same session.
+    db.setUserActive(phone, true);
+    assert.equal((await client.post('/api/prospects', { name: 'Apres renouvellement' })).status, 201);
+});
+
+test('a subscription lapsed past the grace period blocks the next request with the renewal message', async () => {
     const phone = '+237600444004';
     const user = makeActiveUser('Lapsed', phone);
     const client = await loginAs(phone);
     assert.equal((await client.get('/api/prospects')).status, 200);
 
-    // Simulate the subscription window running out while the session (which
-    // lasts longer) is still valid. Separate connection to the same test DB.
-    const raw = new DatabaseSync(process.env.DB_PATH);
-    raw.prepare(`UPDATE users SET subscription_expires_at = ? WHERE id = ?`)
-        .run(new Date(Date.now() - 60 * 1000).toISOString(), user.id);
-    raw.close();
+    // The subscription window (and its 3-day grace) ran out while the
+    // session, which lasts longer, is still valid.
+    setExpiry(user.id, -4 * DAY);
 
     const res = await client.get('/api/prospects');
     assert.equal(res.status, 401);

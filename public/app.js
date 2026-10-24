@@ -565,6 +565,31 @@ function startLiveRefresh() {
   }, 20000);
 }
 
+// Logged in with an expired subscription = the server's grace period
+// (read-only; past it, the session would have been refused). Say so plainly
+// and point to the renewal instructions, instead of letting every save fail.
+async function renderGraceBanner() {
+  const banner = document.getElementById('graceBanner');
+  const expiresAt = currentUser?.subscription_expires_at ? new Date(currentUser.subscription_expires_at) : null;
+  if (!expiresAt || expiresAt >= new Date()) {
+    banner.classList.add('hidden');
+    return;
+  }
+  let graceDays = 3;
+  try { graceDays = (await api('/api/subscription/info')).grace_days ?? graceDays; } catch { /* offline: default */ }
+  const until = new Date(expiresAt.getTime() + graceDays * 24 * 60 * 60 * 1000);
+  const fmt = d => d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' });
+  banner.innerHTML = `
+    <span><strong>Ton abonnement a expiré le ${escapeHtml(fmt(expiresAt))}.</strong>
+    Ton compte est en lecture seule jusqu'au ${escapeHtml(fmt(until))}, puis l'accès sera coupé. Renouvelle-le pour continuer à travailler.</span>
+    <button class="btn-primary" data-grace-renew>Comment renouveler</button>`;
+  banner.classList.remove('hidden');
+}
+
+document.getElementById('graceBanner').addEventListener('click', (e) => {
+  if (e.target.closest('[data-grace-renew]')) document.getElementById('subscriptionBtn').click();
+});
+
 async function bootApp() {
   showApp();
   const userInfoEl = document.getElementById('currentUserInfo');
@@ -581,6 +606,7 @@ async function bootApp() {
     userInfoEl.classList.remove('subscription-warning');
   }
   document.getElementById('adminTabBtn').classList.toggle('hidden', !currentUser?.is_admin);
+  renderGraceBanner();
   populateDialSelects();
   populateCountrySelects();
   populateFilterOptions();

@@ -514,6 +514,7 @@ const OfflineSync = (() => {
       const body = await res.json().catch(() => ({}));
       const err = new Error(body.error || `HTTP ${res.status}`);
       err.status = res.status;
+      err.code = body.code;
       throw err;
     }
     return res.status === 204 ? null : res.json();
@@ -522,6 +523,9 @@ const OfflineSync = (() => {
   function isRetryable(err) {
     if (!err) return false;
     if (err.isNetworkFailure) return true;
+    // Subscription in its grace period (read-only): the change is valid,
+    // the account just can't write until renewed — keep it queued.
+    if (err.code === 'subscription_grace') return true;
     return err.status === 408 || err.status === 429 || err.status >= 500;
   }
 

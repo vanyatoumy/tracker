@@ -17,8 +17,14 @@ l'abonnement et les étapes pour démarrer) à côté de deux onglets :
 Un nouveau compte est créé **inactif** : règle l'abonnement (instructions
 dans **"⋮" → "Mon abonnement"** ou auprès de ton administrateur), puis
 l'administrateur active ton compte. Chaque activation donne accès pour une
-durée fixe (30 jours par défaut). Si l'abonnement expire ou si le compte est
-désactivé, l'accès est coupé immédiatement, même si tu étais déjà connecté.
+durée fixe (30 jours par défaut).
+
+Quand l'abonnement expire, tu as **3 jours de grâce** : ton compte reste
+consultable en **lecture seule**, avec un bandeau rouge et un bouton
+"Comment renouveler". Sur l'app mobile, ce que tu modifies hors ligne
+pendant ces jours est gardé en attente et synchronisé dès le
+renouvellement. Passé ce délai, l'accès est coupé. Un compte désactivé par
+l'administrateur est coupé immédiatement.
 
 Chaque compte est totalement isolé : tu ne vois que tes propres contacts,
 jamais ceux d'un autre distributeur.

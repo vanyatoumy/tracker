@@ -286,3 +286,23 @@ test('a create whose response was lost is not duplicated when the sync retries i
     const posts = h.calls.filter(c => c.method === 'POST');
     assert.deepEqual(posts.map(c => c.body.client_ref), [temp.id, temp.id]);
 });
+
+test('changes refused during the subscription grace period stay queued and go through once renewed', async () => {
+    const h = createHarness();
+    await loggedIn(h);
+
+    h.network.down = true;
+    await offlineWrite(h, '/api/prospects', 'POST', { name: 'Pendant la grace' });
+
+    h.network.down = false;
+    h.network.respond = () => new Response(JSON.stringify({ error: 'lecture seule', code: 'subscription_grace' }), { status: 403 });
+    await h.OfflineSync.syncPendingChanges();
+    assert.equal(await h.OfflineSync.pendingCount(), 1, 'kept, not dropped');
+    assert.equal((await h.OfflineSync.failedChanges()).length, 0);
+    assert.equal(h.OfflineSync.authBlocked, false, 'no re-login needed, just a renewal');
+
+    h.network.respond = null; // admin renewed the subscription
+    await h.OfflineSync.syncPendingChanges();
+    assert.equal(await h.OfflineSync.pendingCount(), 0);
+    assert.equal(h.prospects.size, 1);
+});

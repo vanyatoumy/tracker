@@ -60,6 +60,11 @@ module.exports = {
     // auto-deactivated on next login attempt.
     SUBSCRIPTION_DURATION_DAYS: parseInt10(process.env.SUBSCRIPTION_DURATION_DAYS, 30),
 
+    // Grace period after expiry: the account stays readable (no changes
+    // allowed) for this many days, with a renewal banner, before access is
+    // cut off entirely. 0 = cut off at expiry, as before.
+    SUBSCRIPTION_GRACE_DAYS: parseInt10(process.env.SUBSCRIPTION_GRACE_DAYS, 3),
+
     // Shown to users in the app (pre-login payment instructions, "My
     // subscription" panel) — plain text/strings, not used for anything
     // functional. Safe to leave the defaults and override in .env.

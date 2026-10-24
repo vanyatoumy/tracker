@@ -19,8 +19,13 @@ and the steps to get started) next to two tabs:
 New accounts are created **inactive**: pay the subscription (instructions
 under **"⋮" → "Mon abonnement"** or from your admin), then the admin
 activates your account. Each activation grants access for a fixed period
-(30 days by default). If the subscription expires or the account is
-deactivated, access stops immediately, even if you were already logged in.
+(30 days by default).
+
+When the subscription expires, you get **3 days of grace**: the account
+stays viewable **read-only**, with a red banner and a "Comment renouveler"
+(How to renew) button. On the mobile app, changes made offline during those
+days are kept and synced once renewed. After that, access stops. An
+account deactivated by the admin is cut off immediately.
 
 Each account is fully isolated — you only ever see your own contacts,
 never another distributor's.

@@ -134,6 +134,9 @@ function getTokenFromRequest(req) {
 // linger as active until some other action catches it.
 function accountAccessError(user) {
     if (user.subscription_expires_at && new Date(user.subscription_expires_at) < new Date()) {
+        // Within the grace period the account stays usable read-only (see
+        // inSubscriptionGrace / requireAuth) — only cut off after it.
+        if (inSubscriptionGrace(user) && user.is_active) return null;
         if (user.is_active) db.setUserActiveById(user.id, false);
         return 'Ton abonnement a expire. Contacte l\'administrateur pour le renouveler.';
     }
@@ -141,6 +144,16 @@ function accountAccessError(user) {
         return 'Ce compte n\'a pas encore ete active. Contacte l\'administrateur.';
     }
     return null;
+}
+
+// Expired, but less than SUBSCRIPTION_GRACE_DAYS ago: readable, no changes.
+// A lapse shouldn't feel like losing everything overnight — the admin has
+// a few days to get the renewal through (see the admin renewals panel).
+function inSubscriptionGrace(user) {
+    if (!user.subscription_expires_at) return false;
+    const expiresAt = new Date(user.subscription_expires_at).getTime();
+    const now = Date.now();
+    return expiresAt < now && now < expiresAt + config.SUBSCRIPTION_GRACE_DAYS * 24 * 60 * 60 * 1000;
 }
 
 // Checked on every request, not just at login: a session outlives the
@@ -157,6 +170,14 @@ function requireAuth(req, res, next) {
     if (accessError) {
         db.deleteSession(token);
         return res.status(401).json({ error: accessError });
+    }
+    if (req.method !== 'GET' && inSubscriptionGrace(user)) {
+        // code lets the mobile offline queue keep (not drop) changes made
+        // during the grace period, and replay them once renewed.
+        return res.status(403).json({
+            error: 'Ton abonnement a expire : lecture seule. Renouvelle-le pour pouvoir modifier tes contacts.',
+            code: 'subscription_grace'
+        });
     }
     req.userId = user.id;
     req.user = user;
@@ -183,6 +204,7 @@ app.get('/api/subscription/info', (req, res) => {
     res.json({
         price: config.SUBSCRIPTION_PRICE,
         duration_days: config.SUBSCRIPTION_DURATION_DAYS,
+        grace_days: config.SUBSCRIPTION_GRACE_DAYS,
         instructions: config.SUBSCRIPTION_PAYMENT_INSTRUCTIONS,
         contact: config.SUBSCRIPTION_CONTACT
     });
