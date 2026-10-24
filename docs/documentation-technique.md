@@ -38,7 +38,8 @@ errors.js                    Classes d'erreur typées (ValidationError, AuthErro
 google-contacts-import.js    Parsing/normalisation du CSV d'import Google Contacts
 public/
   index.html                 Interface (une seule page, kanban + modales)
-  app.js                     Logique frontend (état, rendu, appels API)
+  planning.js                Règles pures (vue Aujourd'hui, modèles, renouvellements), testées
+  js/                        Logique frontend, découpée par zone (voir §6)
   offline.js                 Couche de synchronisation hors-ligne (mobile)
   style.css                  Thème
   env.js                     API_BASE_URL — seul fichier à éditer pour changer
@@ -175,7 +176,14 @@ frontend.
 
 ## 6. Frontend
 
-Pas de framework, pas de build step. `public/app.js` gère :
+Pas de framework, pas de build step. Le code est découpé en scripts
+classiques dans `public/js/` (`core`, `auth`, `notifications`, `shell`,
+`board`, `data`, `today`, `templates`, `tabs`, `admin`, `forms`, `detail`,
+`init`), chargés **dans cet ordre** par `index.html` et partageant une
+seule portée globale : le code exécuté au chargement ne voit que les
+fichiers précédents, et `init.js` doit rester le dernier (un test le
+vérifie). Les règles sans DOM vivent dans `public/planning.js` (testé
+sous Node). Ensemble, ils gèrent :
 
 - L'état applicatif en mémoire (liste des prospects, filtres actifs, etc.)
 - Le rendu du kanban et des modales (manipulation directe du DOM)

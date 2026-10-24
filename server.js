@@ -22,7 +22,7 @@ if (config.TRUST_PROXY) {
 
 // Custom CSP: the frontend is vanilla JS/CSS served from this same origin
 // (no inline <script>), plus Google Fonts for the Montserrat typeface.
-// style-src needs 'unsafe-inline' because app.js renders a few dynamic
+// style-src needs 'unsafe-inline' because the frontend (public/js/) renders a few dynamic
 // inline styles (e.g. the kanban progress-bar fill percentage) via
 // innerHTML — fine here since there is no inline *script*, only style.
 app.use(helmet({

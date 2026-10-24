@@ -6,7 +6,7 @@
 // cached list exactly like the board does, and these rules can be unit
 // tested in Node (tests/planning.test.js).
 //
-// Loaded as a plain <script> before app.js (no bundler in this project), so
+// Loaded as a plain <script> before the js/ frontend files (no bundler in this project), so
 // it's a global `Planning` object; also exported for Node when required.
 
 const Planning = (() => {

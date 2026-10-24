@@ -600,6 +600,21 @@
 <script src="env.js"></script>
 <script src="offline.js"></script>
 <script src="planning.js"></script>
-<script src="app.js"></script>
+<!-- Frontend, split by area. Plain scripts sharing one global scope: the
+     order matters (code that runs at load only sees earlier files), init.js
+     must stay last. See the header of each file. -->
+<script src="js/core.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/notifications.js"></script>
+<script src="js/shell.js"></script>
+<script src="js/board.js"></script>
+<script src="js/data.js"></script>
+<script src="js/today.js"></script>
+<script src="js/templates.js"></script>
+<script src="js/tabs.js"></script>
+<script src="js/admin.js"></script>
+<script src="js/forms.js"></script>
+<script src="js/detail.js"></script>
+<script src="js/init.js"></script>
 </body>
 </html>

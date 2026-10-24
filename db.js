@@ -104,7 +104,7 @@ CREATE TABLE IF NOT EXISTS interactions (
 CREATE INDEX IF NOT EXISTS idx_interactions_prospect ON interactions(prospect_id);
 
 -- Reusable WhatsApp message texts, per user. Variables like {prenom} are
--- filled in client-side when the message is sent (see app.js).
+-- filled in client-side when the message is sent (see public/planning.js).
 CREATE TABLE IF NOT EXISTS message_templates (
     id              TEXT PRIMARY KEY,
     owner_id        TEXT NOT NULL,

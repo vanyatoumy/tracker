@@ -20,7 +20,7 @@
 // used by a small team, not a crowd — full merge/conflict UI is out of
 // scope for what that risk actually costs.
 //
-// Loaded as a plain <script> before app.js (no bundler in this project), so
+// Loaded as a plain <script> before the js/ frontend files (no bundler in this project), so
 // it's a global `OfflineSync` object rather than an ES module export.
 
 const OfflineSync = (() => {
@@ -629,10 +629,10 @@ const OfflineSync = (() => {
     return null;
   }
 
-  // Mirrors api()'s contract in app.js exactly: resolves to parsed JSON (or
+  // Mirrors api()'s contract in js/core.js exactly: resolves to parsed JSON (or
   // null for 204), or throws an Error with a user-facing .message. showAuth
-  // is app.js's showAuthScreen, passed in rather than referenced globally so
-  // this module doesn't assume load order relative to app.js.
+  // is js/auth.js's showAuthScreen, passed in rather than referenced globally so
+  // this module doesn't assume load order relative to the js/ files.
   async function request(path, opts, showAuth) {
     await readyPromise;
     const method = (opts.method || 'GET').toUpperCase();
@@ -658,7 +658,7 @@ const OfflineSync = (() => {
 
     isOnline = true;
     if (res.status === 401 && !isAuthAttempt) {
-      // Same reason passthrough as app.js's api(): deactivated account or
+      // Same reason passthrough as js/core.js's api(): deactivated account or
       // lapsed subscription, not just an expired session.
       const body = await res.json().catch(() => ({}));
       showAuth();
