@@ -88,6 +88,19 @@ Tiède, Chaud — voir § 4), il s'affiche en couleur sur sa carte.
 **Colonnes repliables** : clique sur l'en-tête d'une colonne pour la
 replier/déplier. Cette préférence est mémorisée sur cet appareil.
 
+**Longues colonnes** : chaque colonne affiche 30 contacts, puis un bouton
+"Afficher 30 de plus" (le compteur en haut de la colonne donne le total).
+
+**Actions groupées** : le bouton **"Sélectionner"** en haut du pipeline
+transforme les cartes en cases à cocher. Touche les contacts à modifier, ou
+**"Tout"** en haut d'une colonne pour la sélectionner en entier (y compris
+les contacts pas encore affichés). Une barre en bas de l'écran permet alors
+de, en une fois : déplacer vers une étape, changer la température,
+programmer une relance demain à 9h, effacer la relance, ou marquer comme
+perdus (restaurables depuis "Archives"). Il n'y a volontairement pas de
+suppression définitive groupée. "Terminer" (ou Échap) quitte le mode
+sélection. Nécessite une connexion.
+
 **Sur téléphone** : une rangée d'onglets en haut du pipeline (avec le
 nombre de contacts par étape) affiche une étape à la fois.
 

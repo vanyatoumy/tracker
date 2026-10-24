@@ -670,6 +670,46 @@ function archiveProspect(ownerId, id, archived = true) {
     return getProspect(ownerId, id);
 }
 
+// One change applied to many contacts at once (board selection mode).
+// All-or-nothing in a single transaction; ids that don't exist or belong to
+// someone else are silently ignored (never touched). Stage moves still go
+// through stage_history, like transitionStage, so each one is logged — and a
+// contact already at the target stage gets no history line.
+const BULK_ACTIONS = ['stage', 'archive', 'temperature', 'followup'];
+function bulkUpdateProspects(ownerId, ids, action, value) {
+    const owned = [];
+    const unique = [...new Set(ids)];
+    for (let i = 0; i < unique.length; i += 500) {
+        const chunk = unique.slice(i, i + 500);
+        owned.push(...db.prepare(`
+            SELECT id, stage FROM prospects WHERE owner_id = ? AND id IN (${chunk.map(() => '?').join(',')})
+        `).all(ownerId, ...chunk));
+    }
+
+    const ts = now();
+    db.exec('BEGIN IMMEDIATE;');
+    try {
+        const insertHistory = db.prepare(`
+            INSERT INTO stage_history (id, prospect_id, from_stage, to_stage, changed_at, note)
+            VALUES (?, ?, ?, ?, ?, NULL)
+        `);
+        const column = { archive: 'is_archived', temperature: 'temperature', followup: 'next_followup_at' }[action];
+        const update = column && db.prepare(`UPDATE prospects SET ${column} = ?, updated_at = ? WHERE id = ? AND owner_id = ?`);
+        for (const p of owned) {
+            if (action === 'stage') {
+                if (p.stage !== value) insertHistory.run(randomUUID(), p.id, p.stage, value, ts);
+            } else {
+                update.run(action === 'archive' ? (value ? 1 : 0) : value, ts, p.id, ownerId);
+            }
+        }
+        db.exec('COMMIT;');
+    } catch (err) {
+        db.exec('ROLLBACK;');
+        throw err;
+    }
+    return { updated: owned.length, prospects: owned.map(p => getProspect(ownerId, p.id)) };
+}
+
 function deleteProspect(ownerId, id) {
     db.prepare(`DELETE FROM prospects WHERE id = ? AND owner_id = ?`).run(id, ownerId);
 }
@@ -1018,6 +1058,8 @@ module.exports = {
     updateProspect,
     transitionStage,
     archiveProspect,
+    BULK_ACTIONS,
+    bulkUpdateProspects,
     deleteProspect,
     getStageHistory,
     addInteraction,

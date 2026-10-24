@@ -89,6 +89,18 @@ Warm / Hot, see § 4), it shows in colour on the card.
 **Collapsible columns**: click a column header to collapse/expand it. This
 preference is remembered on that device.
 
+**Long columns**: each column shows 30 contacts, then a "Afficher 30 de
+plus" (Show 30 more) button (the count at the top gives the total).
+
+**Bulk actions**: the **"Sélectionner"** (Select) button above the pipeline
+turns cards into checkboxes. Tap the contacts to change, or **"Tout"**
+(All) at the top of a column to select all of it (including contacts not
+displayed yet). A bar at the bottom of the screen then applies, in one go:
+move to a stage, set the temperature, schedule a follow-up tomorrow at 9am,
+clear the follow-up, or mark as lost (restorable from "Archives"). There is
+deliberately no bulk permanent delete. "Terminer" (Done) or Escape leaves
+selection mode. Requires a connection.
+
 **On a phone**: a row of tabs at the top of the pipeline (with the number
 of contacts per stage) shows one stage at a time.
 

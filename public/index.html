@@ -157,6 +157,10 @@
 
   <!-- BOARD VIEW -->
   <section id="boardView" class="view hidden">
+    <div class="board-toolbar">
+      <button id="selectModeBtn" class="btn-ghost" data-requires-online title="Selectionner plusieurs contacts pour les modifier en une fois">Selectionner</button>
+      <span id="selectHint" class="section-hint hidden">Touche les cartes a modifier, ou « Tout » en haut d'une colonne.</span>
+    </div>
     <div class="stage-tabs" id="stageTabs"><!-- mobile only, see renderStageTabs --></div>
     <div class="board" id="board">
       <!-- columns injected by app.js -->
@@ -510,6 +514,25 @@
       </div>
     </div>
   </div>
+</div>
+
+<!-- BULK ACTION BAR (board selection mode, see app.js "BULK ACTIONS") -->
+<div id="bulkBar" class="bulk-bar hidden" role="toolbar" aria-label="Actions groupees">
+  <span id="bulkCount" class="bulk-count">0 selectionne</span>
+  <div class="bulk-actions">
+    <select id="bulkStage" aria-label="Deplacer vers une etape"><option value="">Deplacer vers…</option></select>
+    <select id="bulkTemperature" aria-label="Changer la temperature">
+      <option value="">Temperature…</option>
+      <option value="chaud">Chaud</option>
+      <option value="tiede">Tiede</option>
+      <option value="froid">Froid</option>
+      <option value="__clear">Aucune</option>
+    </select>
+    <button class="btn-ghost" data-bulk="followup-tomorrow">Relance demain</button>
+    <button class="btn-ghost" data-bulk="followup-clear">Effacer la relance</button>
+    <button class="btn-danger" data-bulk="archive">Marquer comme perdus</button>
+  </div>
+  <button class="btn-ghost bulk-close" data-bulk="cancel">Terminer</button>
 </div>
 
 <!-- SEND TEMPLATED MESSAGE MODAL -->

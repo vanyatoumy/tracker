@@ -640,6 +640,110 @@ async function moveStage(id, toStage, triggerEl) {
   }
 }
 
+// ============================================
+// BULK ACTIONS (board selection mode)
+// ============================================
+// "Selectionner" turns the board's cards into checkboxes; the bar at the
+// bottom applies one change to every selected contact in a single request
+// (POST /api/prospects/bulk). Online only — the bulk route isn't part of
+// the offline queue.
+let selectionMode = false;
+const selectedIds = new Set();
+
+function setSelectionMode(on) {
+  selectionMode = on;
+  selectedIds.clear();
+  document.getElementById('selectModeBtn').textContent = on ? 'Annuler la selection' : 'Selectionner';
+  document.getElementById('selectModeBtn').classList.toggle('active', on);
+  document.getElementById('selectHint').classList.toggle('hidden', !on);
+  document.body.classList.toggle('selecting', on);
+  updateBulkBar();
+  renderBoard();
+}
+
+function toggleSelected(id) {
+  if (selectedIds.has(id)) selectedIds.delete(id); else selectedIds.add(id);
+  updateBulkBar();
+  renderBoard();
+}
+
+function updateBulkBar() {
+  const n = selectedIds.size;
+  document.getElementById('bulkBar').classList.toggle('hidden', !selectionMode);
+  document.getElementById('bulkCount').textContent = `${n} selectionne${n > 1 ? 's' : ''}`;
+  document.querySelectorAll('#bulkBar .bulk-actions select, #bulkBar .bulk-actions button').forEach(el => { el.disabled = n === 0; });
+}
+
+document.getElementById('bulkStage').innerHTML = '<option value="">Deplacer vers…</option>' +
+  STAGES.map(s => `<option value="${s.key}">${s.label}</option>`).join('');
+
+document.getElementById('selectModeBtn').addEventListener('click', () => setSelectionMode(!selectionMode));
+
+// "Tout" / "Aucun" in a column header: every contact of that stage, not
+// just the cards currently shown (the column may be paged).
+document.getElementById('board').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-select-stage]');
+  if (!btn) return;
+  const items = currentProspects.filter(p => p.stage === btn.dataset.selectStage && !p.is_archived);
+  const all = items.every(p => selectedIds.has(p.id));
+  items.forEach(p => { if (all) selectedIds.delete(p.id); else selectedIds.add(p.id); });
+  updateBulkBar();
+  renderBoard();
+});
+
+async function runBulk(action, value, label) {
+  const ids = [...selectedIds];
+  if (ids.length === 0) return;
+  if (!confirm(`${label} : ${ids.length} contact${ids.length > 1 ? 's' : ''} ?`)) return;
+  try {
+    const res = await api('/api/prospects/bulk', { method: 'POST', body: JSON.stringify({ ids, action, value }) });
+    if (action === 'followup') {
+      for (const p of res.prospects) await syncFollowupNotification(p);
+    }
+    if (action === 'archive') {
+      for (const p of res.prospects) await cancelFollowupNotification(p.id);
+      selectedIds.clear(); // they've left the board
+    }
+    await refreshAll();
+    updateBulkBar();
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+document.getElementById('bulkStage').addEventListener('change', async (e) => {
+  const stage = STAGES.find(s => s.key === e.target.value);
+  e.target.value = '';
+  if (stage) await runBulk('stage', stage.key, `Deplacer vers « ${stage.label} »`);
+});
+
+document.getElementById('bulkTemperature').addEventListener('change', async (e) => {
+  const value = e.target.value;
+  e.target.value = '';
+  if (!value) return;
+  const t = value === '__clear' ? null : value;
+  await runBulk('temperature', t, t ? `Temperature « ${TEMPERATURE_LABELS[t]} »` : 'Retirer la temperature');
+});
+
+document.getElementById('bulkBar').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-bulk]');
+  if (!btn) return;
+  switch (btn.dataset.bulk) {
+    case 'followup-tomorrow': {
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      tomorrow.setHours(9, 0, 0, 0);
+      return runBulk('followup', tomorrow.toISOString(), 'Programmer une relance demain a 9h');
+    }
+    case 'followup-clear':
+      return runBulk('followup', null, 'Effacer la relance');
+    case 'archive':
+      return runBulk('archive', true, 'Marquer comme perdus (restaurables depuis « Archives »)');
+    case 'cancel':
+      return setSelectionMode(false);
+  }
+});
+
 function renderBoard() {
   const board = document.getElementById('board');
   // board.innerHTML = '' below wipes every column's scroll position along
@@ -663,14 +767,18 @@ function renderBoard() {
 
     const col = document.createElement('div');
     col.className = `column ${isCollapsed ? 'collapsed' : ''} ${WON_STAGES.includes(stage.key) ? 'column-won' : ''} ${stage.key === mobileStage ? 'mobile-active' : ''}`;
+    const allSelected = items.length > 0 && items.every(p => selectedIds.has(p.id));
+    const selectAllBtn = selectionMode && items.length > 0
+      ? `<button class="column-select-all ${allSelected ? 'active' : ''}" data-select-stage="${stage.key}" title="${allSelected ? 'Tout deselectionner' : `Selectionner les ${items.length} contacts de cette colonne`}">${allSelected ? 'Aucun' : 'Tout'}</button>`
+      : '';
     col.innerHTML = `
       <div class="column-header">
         <p class="column-title">
           <span class="column-title-text">
             <button class="collapse-toggle" data-stage="${stage.key}" title="Reduire / agrandir">${isCollapsed ? icon('chevronRight') : icon('chevronDown')}</button>
-            ${stage.label}
+            <span class="column-label" title="${stage.label}">${stage.label}</span>
           </span>
-          <span class="column-count">${items.length}</span>
+          <span class="column-title-right">${selectAllBtn}<span class="column-count">${items.length}</span></span>
         </p>
         <div class="progress-rail"><div class="progress-rail-fill" style="width:${fillPct}%"></div></div>
       </div>
@@ -701,10 +809,28 @@ function renderBoard() {
       body.innerHTML = `<div class="empty-column">Aucun contact</div>`;
       return;
     }
-    items.forEach(p => body.appendChild(renderCard(p)));
+    // Only the first COLUMN_PAGE cards are built: a column with hundreds of
+    // imported contacts made every re-render (live refresh every 20s
+    // included) slow, especially on low-end phones.
+    const limit = columnLimits[stage.key] || COLUMN_PAGE;
+    items.slice(0, limit).forEach(p => body.appendChild(renderCard(p)));
+    if (items.length > limit) {
+      const more = document.createElement('button');
+      more.className = 'column-more';
+      const next = Math.min(COLUMN_PAGE, items.length - limit);
+      more.textContent = `Afficher ${next} de plus · ${items.length - limit} restant${items.length - limit > 1 ? 's' : ''}`;
+      more.addEventListener('click', () => {
+        columnLimits[stage.key] = limit + COLUMN_PAGE;
+        renderBoard();
+      });
+      body.appendChild(more);
+    }
     if (scrollTops[stage.key]) body.scrollTop = scrollTops[stage.key];
   });
 }
+
+const COLUMN_PAGE = 30;
+const columnLimits = {}; // stage -> how many cards are shown (grows with "Afficher plus")
 
 const WON_STAGES = ['client', 'partenaire'];
 const TEMPERATURE_LABELS = { froid: 'Froid', tiede: 'Tiede', chaud: 'Chaud' };
@@ -771,6 +897,19 @@ function renderCard(p) {
     <div class="card-meta">${ageHtml}</div>
     ${followupHtml}${reorderHtml}
   `;
+  // Selection mode: the card is a checkbox — a click selects it instead of
+  // opening it, and the per-card actions (advance, drag) step aside.
+  if (selectionMode) {
+    card.classList.add('selectable');
+    card.classList.toggle('selected', selectedIds.has(p.id));
+    card.insertAdjacentHTML('afterbegin', `<span class="card-check" aria-hidden="true">${selectedIds.has(p.id) ? '✓' : ''}</span>`);
+    card.addEventListener('click', (e) => {
+      if (e.target.closest('a')) return;
+      toggleSelected(p.id);
+    });
+    return card;
+  }
+
   // Quick "next stage" button — the one move a rep makes all day, without
   // opening the detail panel (works on phones, where there's no drag).
   const stageIdx = STAGES.findIndex(s => s.key === p.stage);
@@ -1356,6 +1495,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.classList.add('active');
     document.querySelectorAll('.view').forEach(v => v.classList.add('hidden'));
     const view = btn.dataset.view;
+    if (view !== 'board' && selectionMode) setSelectionMode(false);
     document.getElementById(view + 'View').classList.remove('hidden');
     document.getElementById('filterBar').classList.toggle('hidden', view !== 'board');
     if (view === 'today') await loadToday({ fresh: true });
@@ -2070,6 +2210,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   const open = [...document.querySelectorAll('.modal-overlay')].filter(m => !m.classList.contains('hidden'));
   if (open.length) open[open.length - 1].classList.add('hidden');
+  else if (selectionMode) setSelectionMode(false);
 });
 
 // Prefill (never the password) so returning to the login screen doesn't

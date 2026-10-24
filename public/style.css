@@ -641,6 +641,52 @@ main { padding: 24px 28px 60px; }
 .card.age-fresh { border-left-color: #3a3a3a; }
 .card.age-warm { border-left-color: #c98a2a; }
 .card.age-stale { border-left-color: var(--red); }
+/* ---------- Board toolbar, selection mode, bulk bar, column paging ---------- */
+.board-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.board-toolbar .section-hint { margin: 0; }
+#selectModeBtn.active { border-color: var(--red); background: #2a1010; }
+.column-title-right { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; }
+/* One line, truncated if the column gets narrow (e.g. with the "Tout"
+   button beside it in selection mode) instead of wrapping. */
+.column-title-text { min-width: 0; }
+.column-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.column-select-all {
+  background: transparent; border: 1px solid var(--border); color: var(--text-muted);
+  font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 10px; cursor: pointer;
+  text-transform: none; letter-spacing: 0;
+}
+.column-select-all:hover, .column-select-all.active { border-color: var(--red); color: var(--text); }
+.card.selectable { cursor: pointer; padding-left: 34px; position: relative; }
+.card.selectable:hover { transform: none; }
+.card-check {
+  position: absolute; left: 10px; top: 12px; width: 16px; height: 16px; border-radius: 4px;
+  border: 1.5px solid var(--text-faint); display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 800; color: #fff;
+}
+.card.selected { border-color: var(--red); background: #241212; }
+.card.selected .card-check { background: var(--red); border-color: var(--red); }
+.column-more {
+  background: transparent; border: 1px dashed var(--border); color: var(--text-muted);
+  padding: 8px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.column-more:hover { border-style: solid; border-color: var(--text-faint); color: var(--text); }
+.bulk-bar {
+  position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 150;
+  width: min(1100px, calc(100vw - 32px));
+  background: var(--surface); border: 1px solid var(--red-deep); border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+  padding: 10px 14px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+}
+.bulk-count { font-weight: 800; font-size: 13px; white-space: nowrap; }
+.bulk-actions { display: flex; gap: 8px; flex-wrap: wrap; flex: 1; }
+.bulk-actions select { width: auto; padding: 8px 10px; font-size: 12.5px; }
+.bulk-actions .btn-ghost, .bulk-actions .btn-danger { padding: 8px 12px; font-size: 12.5px; margin-top: 0; }
+.bulk-actions :disabled { opacity: 0.45; cursor: not-allowed; }
+.bulk-close { margin-left: auto; }
+/* Keep the last cards reachable above the fixed bar */
+body.selecting main { padding-bottom: 120px; }
+body.selecting .column-body { max-height: calc(100vh - 330px); }
+
 /* Quick "next stage" button + drag and drop (renderCard / renderBoard) */
 .card-advance {
   margin-top: 8px;
@@ -1203,6 +1249,14 @@ button.btn-whatsapp { border: none; cursor: pointer; font-family: inherit; displ
   .btn-whatsapp .btn-label { display: none; }
   .btn-whatsapp { padding: 9px 10px; }
   .today-item { padding: 10px; gap: 8px; }
+  .bulk-bar { bottom: 8px; padding: 10px; gap: 8px; }
+  /* Counter + "Terminer" on the first line, the actions as a full-width
+     2-column grid below. */
+  .bulk-actions { order: 3; flex-basis: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .bulk-actions [data-bulk="archive"] { grid-column: 1 / -1; }
+  .bulk-close { padding: 6px 12px; }
+  body.selecting main { padding-bottom: 230px; }
+  .board-toolbar .section-hint { display: none; }
   .funnel-row { grid-template-columns: 92px 1fr 64px; gap: 8px; font-size: 12px; }
   .goal-card { flex-direction: column; align-items: stretch; }
   .activity-grid { grid-template-columns: 1fr 1fr; }

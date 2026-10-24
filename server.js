@@ -51,8 +51,12 @@ app.use(helmet({
 // stream twice.
 const jsonBodyDefault = express.json({ limit: '100kb' });
 const jsonBodyImport = express.json({ limit: '10mb' });
+// Bulk actions carry up to 5000 ids (~200kb) — past the default too.
+const jsonBodyBulk = express.json({ limit: '1mb' });
 app.use((req, res, next) => {
-    const parser = req.path === '/api/prospects/import' ? jsonBodyImport : jsonBodyDefault;
+    const parser = req.path === '/api/prospects/import' ? jsonBodyImport
+        : req.path === '/api/prospects/bulk' ? jsonBodyBulk
+        : jsonBodyDefault;
     parser(req, res, next);
 });
 app.use((req, res, next) => { if (!req.body || typeof req.body !== 'object') req.body = {}; next(); });
@@ -352,6 +356,30 @@ app.post('/api/prospects', requireAuth, (req, res) => {
 // validation, and country lookup all happen here via google-libphonenumber,
 // so users can upload the unmodified Google export with no separate
 // conversion step.
+// Apply one change to many contacts (board selection mode). Deliberately no
+// bulk *delete*: archiving is the bulk-safe "remove", and stays reversible.
+app.post('/api/prospects/bulk', requireAuth, (req, res) => {
+    try {
+        const { ids } = req.body;
+        if (!Array.isArray(ids) || ids.length === 0 || ids.some(id => typeof id !== 'string')) {
+            throw new ValidationError('ids doit etre une liste de contacts');
+        }
+        if (ids.length > 5000) throw new ValidationError('Maximum 5000 contacts par action');
+        // oneOf() maps ''/null to null even when required — guard explicitly.
+        const action = validate.oneOf(req.body.action, "L'action", db.BULK_ACTIONS, { required: true });
+        if (!action) throw new ValidationError("L'action est requise");
+        let value;
+        if (action === 'stage') {
+            value = validate.oneOf(req.body.value, "L'etape", db.STAGES, { required: true });
+            if (!value) throw new ValidationError("L'etape est requise");
+        }
+        if (action === 'archive') value = req.body.value !== false;
+        if (action === 'temperature') value = validate.oneOf(req.body.value, 'La temperature', db.TEMPERATURES) ?? null;
+        if (action === 'followup') value = validate.isoDate(req.body.value, 'La date de relance') || null;
+        res.json(db.bulkUpdateProspects(req.userId, ids, action, value));
+    } catch (err) { handleError(res, err); }
+});
+
 app.post('/api/prospects/import', requireAuth, (req, res) => {
     try {
         const rows = (req.body && req.body.rows) || [];
