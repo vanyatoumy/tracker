@@ -282,6 +282,19 @@ sign-ups not yet paid) and three lists to work through:
 - Reset an account's password (automatically signs out any active session
   on that account).
 
+## 14. Giving feedback
+
+Menu **"⋮" → "Donner mon avis"** (Give feedback): send a **problem**, a
+**feature idea**, a **question** or anything else straight to the SuiviPro
+team, who reply on WhatsApp. Works even during the grace days after the
+subscription expires. Requires a connection.
+
+On the admin side, these messages appear in the **Admin** tab, **"Retours
+utilisateurs"** (User feedback) section ("À traiter" / "Tous" filter): who,
+when, from which device and app version, with a **"Répondre"** (Reply, on
+WhatsApp, message quoted) button and **"Marquer traité"** / **"Rouvrir"**
+(Mark handled / Reopen).
+
 ## Good to know
 
 - One account = one fully isolated pipeline. To practice or demo without

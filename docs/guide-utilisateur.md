@@ -291,6 +291,18 @@ paiement) et trois listes à traiter :
 - Réinitialiser le mot de passe d'un compte (déconnecte automatiquement
   toute session active sur ce compte).
 
+## 14. Donner mon avis
+
+Menu **"⋮" → "Donner mon avis"** : envoie un **problème**, une **idée de
+fonctionnalité**, une **question** ou autre chose directement à l'équipe
+SuiviPro, qui te répond sur WhatsApp. Fonctionne même pendant les jours de
+grâce après l'expiration de l'abonnement. Nécessite une connexion.
+
+Côté administrateur, ces messages apparaissent dans l'onglet **Admin**,
+section **"Retours utilisateurs"** (filtre "À traiter" / "Tous") : qui,
+quand, depuis quel appareil et quelle version, avec un bouton **"Répondre"**
+(WhatsApp, message cité) et **"Marquer traité"** / **"Rouvrir"**.
+
 ## Bon à savoir
 
 - Un compte = un pipeline totalement isolé. Pour t'entraîner ou faire une

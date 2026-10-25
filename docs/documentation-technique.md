@@ -113,6 +113,13 @@ rencontre/note), un enregistrement par prospect et par événement.
 `note`), `ON DELETE CASCADE` sur `prospect_id`. Alimentent le rappel de
 réachat et le chiffre d'affaires des statistiques.
 
+**`feedback`** — messages envoyés depuis « Donner mon avis » (`type` :
+`probleme` / `idee` / `question` / `autre`, `message`, `platform`,
+`app_version`, `status` : `nouveau` / `traite`, `handled_at`). Création
+limitée à 10 par heure et par utilisateur, permise même pendant le délai de
+grâce ; liste et changement de statut réservés aux admins
+(`/api/admin/feedback`).
+
 **`message_templates`** — modèles de message WhatsApp par utilisateur
 (`name`, `body`). Les variables (`{prenom}`, `{nom}`, `{ville}`, `{moi}`)
 sont remplacées côté client ([planning.js](../public/planning.js)).

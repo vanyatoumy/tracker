@@ -107,6 +107,7 @@ async function loadAdminUsers() {
   }
 
   renderRenewals(users);
+  loadAdminFeedback(); // js/feedback.js — not awaited, the users table needn't wait for it
 
   tbody.innerHTML = '';
   users.forEach(u => {

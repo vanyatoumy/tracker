@@ -20,8 +20,11 @@ isn't worth it for something this simple to re-deploy).
        user@54.38.242.120:/path/to/mlm-tracker/public/downloads/suivipro-<version>.apk
    ```
 4. Update the `href` in `public/index.html`'s `.auth-download-note` to
-   point at the new filename, commit that one-line change, and deploy the
-   app as usual (`git pull` + restart on the VPS).
+   point at the new filename, and `APP_VERSION` in `public/js/core.js`
+   (sent with user feedback, so a reported problem can be tied to a
+   release). Commit, then deploy the app as usual (`git pull` + restart on
+   the VPS) — after the APK upload, so the link never points at a missing
+   file.
 
 Older versions can be left in place (in case anyone needs to roll back) or
 deleted manually on the VPS — nothing here is tracked or auto-pruned.

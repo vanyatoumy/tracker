@@ -171,7 +171,9 @@ function requireAuth(req, res, next) {
         db.deleteSession(token);
         return res.status(401).json({ error: accessError });
     }
-    if (req.method !== 'GET' && inSubscriptionGrace(user)) {
+    // Feedback stays open during the grace period: a lapsed subscription is
+    // exactly when someone may have a concern to raise.
+    if (req.method !== 'GET' && inSubscriptionGrace(user) && req.path !== '/api/feedback') {
         // code lets the mobile offline queue keep (not drop) changes made
         // during the grace period, and replay them once renewed.
         return res.status(403).json({
@@ -507,6 +509,44 @@ app.post('/api/prospects/:id/interactions', requireAuth, (req, res) => {
         const type = validate.oneOf(req.body.type, "Le type d'interaction", db.INTERACTION_TYPES, { required: true });
         const content = validate.str(req.body.content, 'Le contenu', { required: true, maxLength: 2000 });
         res.status(201).json(db.addInteraction(req.userId, req.params.id, { type, content }));
+    } catch (err) { handleError(res, err); }
+});
+
+// ---------- FEEDBACK ("Donner mon avis") ----------
+
+// Per user, not per IP (runs after requireAuth): plenty for genuine
+// messages, a ceiling against a stuck button or abuse.
+const feedbackLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: 10,
+    keyGenerator: (req) => req.userId,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Tu as envoye beaucoup de messages en peu de temps — reessaie dans un moment." }
+});
+
+app.post('/api/feedback', requireAuth, feedbackLimiter, (req, res) => {
+    try {
+        const type = validate.oneOf(req.body.type, 'Le type de message', db.FEEDBACK_TYPES, { required: true });
+        if (!type) throw new ValidationError('Le type de message est requis');
+        const message = validate.str(req.body.message, 'Le message', { required: true, maxLength: 2000 });
+        const platform = validate.oneOf(req.body.platform, 'La plateforme', ['web', 'android']);
+        const app_version = validate.str(req.body.app_version, 'La version', { maxLength: 20 });
+        res.status(201).json(db.createFeedback(req.userId, { type, message, platform, app_version }));
+    } catch (err) { handleError(res, err); }
+});
+
+app.get('/api/admin/feedback', requireAuth, requireAdmin, (req, res) => {
+    try {
+        res.json(db.listFeedback());
+    } catch (err) { handleError(res, err); }
+});
+
+app.post('/api/admin/feedback/:id/status', requireAuth, requireAdmin, (req, res) => {
+    try {
+        const status = validate.oneOf(req.body.status, 'Le statut', db.FEEDBACK_STATUSES, { required: true });
+        if (!status) throw new ValidationError('Le statut est requis');
+        res.json(db.setFeedbackStatus(req.params.id, status));
     } catch (err) { handleError(res, err); }
 });
 

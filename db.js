@@ -133,6 +133,24 @@ CREATE TABLE IF NOT EXISTS purchases (
 
 CREATE INDEX IF NOT EXISTS idx_purchases_prospect ON purchases(prospect_id);
 
+-- Messages users send from the app ("Donner mon avis"): problems, feature
+-- ideas, questions. Listed in the admin view, where they're answered on
+-- WhatsApp and marked handled.
+CREATE TABLE IF NOT EXISTS feedback (
+    id              TEXT PRIMARY KEY,
+    user_id         TEXT NOT NULL,
+    type            TEXT NOT NULL CHECK (type IN ('probleme', 'idee', 'question', 'autre')),
+    message         TEXT NOT NULL,
+    platform        TEXT,                    -- 'web' | 'android'
+    app_version     TEXT,
+    status          TEXT NOT NULL DEFAULT 'nouveau' CHECK (status IN ('nouveau', 'traite')),
+    created_at      TEXT NOT NULL,
+    handled_at      TEXT,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_feedback_status ON feedback(status, created_at);
+
 -- Failed-login tracking per (account, client IP). Locking per account alone
 -- let anyone who knew a phone number keep its owner locked out forever just
 -- by sending 4 wrong passwords every 15 minutes; scoped per IP, an attacker
@@ -852,6 +870,38 @@ function deleteTemplate(ownerId, id) {
 }
 
 // ============================================
+// FEEDBACK ("Donner mon avis")
+// ============================================
+const FEEDBACK_TYPES = ['probleme', 'idee', 'question', 'autre'];
+const FEEDBACK_STATUSES = ['nouveau', 'traite'];
+
+function createFeedback(userId, { type, message, platform, app_version }) {
+    const id = randomUUID();
+    db.prepare(`
+        INSERT INTO feedback (id, user_id, type, message, platform, app_version, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'nouveau', ?)
+    `).run(id, userId, type, message, platform || null, app_version || null, now());
+    return db.prepare(`SELECT * FROM feedback WHERE id = ?`).get(id);
+}
+
+// Admin view: newest first, with who sent it (name + phone for the reply).
+function listFeedback() {
+    return db.prepare(`
+        SELECT f.*, u.name AS user_name, u.phone AS user_phone
+        FROM feedback f JOIN users u ON u.id = f.user_id
+        ORDER BY f.created_at DESC, f.rowid DESC
+    `).all();
+}
+
+function setFeedbackStatus(id, status) {
+    const existing = db.prepare(`SELECT id FROM feedback WHERE id = ?`).get(id);
+    if (!existing) throw new NotFoundError('Message introuvable');
+    db.prepare(`UPDATE feedback SET status = ?, handled_at = ? WHERE id = ?`)
+        .run(status, status === 'traite' ? now() : null, id);
+    return db.prepare(`SELECT * FROM feedback WHERE id = ?`).get(id);
+}
+
+// ============================================
 // REMINDERS
 // ============================================
 function getDueReminders(ownerId) {
@@ -1101,6 +1151,11 @@ module.exports = {
     getStageHistory,
     addInteraction,
     getInteractions,
+    FEEDBACK_TYPES,
+    FEEDBACK_STATUSES,
+    createFeedback,
+    listFeedback,
+    setFeedbackStatus,
     getPurchases,
     addPurchase,
     deletePurchase,

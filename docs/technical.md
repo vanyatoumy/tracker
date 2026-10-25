@@ -110,6 +110,12 @@ meeting/note), one row per prospect per event.
 `note`), `ON DELETE CASCADE` on `prospect_id`. Drive the reorder reminder
 and the revenue figure in the statistics.
 
+**`feedback`** — messages sent from "Donner mon avis" (`type`:
+`probleme` / `idee` / `question` / `autre`, `message`, `platform`,
+`app_version`, `status`: `nouveau` / `traite`, `handled_at`). Creation is
+limited to 10 per hour per user and allowed even during the grace period;
+listing and status changes are admin-only (`/api/admin/feedback`).
+
 **`message_templates`** — per-user WhatsApp message templates (`name`,
 `body`). Variables (`{prenom}`, `{nom}`, `{ville}`, `{moi}`) are filled in
 client-side ([planning.js](../public/planning.js)).

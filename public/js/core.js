@@ -30,6 +30,11 @@ const SOURCE_LABELS = {
   non_renseigne: 'Non renseigne'
 };
 
+// Sent with feedback so a reported problem can be tied to a release. Keep
+// in step with versionName in android/app/build.gradle (see the release
+// steps in public/downloads/README.md).
+const APP_VERSION = '1.2';
+
 let currentProspects = [];
 let activeProspectId = null;
 let activeProspect = null; // full object for the open detail panel

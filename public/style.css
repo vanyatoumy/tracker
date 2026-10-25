@@ -1028,6 +1028,30 @@ textarea { resize: vertical; min-height: 64px; }
 .renewal-actions .btn-ghost { padding: 8px 12px; font-size: 12px; }
 .tag.reminded { border-color: #1f7a3d; color: var(--green); margin-left: 4px; }
 
+/* ---------- Feedback: user form + admin list ---------- */
+.feedback-form .section-hint { margin: 0; }
+.feedback-types { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.feedback-types label {
+  flex-direction: row; align-items: center; gap: 8px; cursor: pointer;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px 12px; color: var(--text); font-size: 12.5px;
+}
+.feedback-types label:has(input:checked) { border-color: var(--red); background: #2a1010; }
+.feedback-types input { width: auto; accent-color: var(--red); }
+.feedback-status { margin: 0; font-size: 13px; padding: 10px 12px; border-radius: 8px; }
+.feedback-status.success { color: var(--green); background: #0f2416; border: 1px solid #1f7a3d; }
+.feedback-status.error { color: #ff8a6b; background: #2a1010; border: 1px solid var(--red-deep); }
+.feedback-status.hidden { display: none; }
+.feedback-item { align-items: flex-start; }
+.feedback-message { margin: 6px 0 0; font-size: 13px; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
+.feedback-probleme { border-left: 3px solid var(--red); }
+.feedback-idee { border-left: 3px solid var(--green); }
+.feedback-question { border-left: 3px solid #4a8fd8; }
+.feedback-autre { border-left: 3px solid var(--text-faint); }
+.feedback-item.is-handled { opacity: 0.6; }
+.tag.feedback-type { margin-right: 4px; }
+@media (max-width: 480px) { .feedback-types { grid-template-columns: 1fr; } }
+
 /* ---------- STATS: period, activity, goal, funnel ---------- */
 .period-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 18px; }
 .period-chips button {

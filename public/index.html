@@ -144,6 +144,7 @@
         <button id="templatesBtn" class="dropdown-item">Mes modeles de message</button>
         <button id="morningToggleBtn" class="dropdown-item hidden">Resume du matin (8h)</button>
         <button id="subscriptionBtn" class="dropdown-item">Mon abonnement</button>
+        <button id="feedbackBtn" class="dropdown-item" data-requires-online>Donner mon avis</button>
         <button id="logoutBtn" class="dropdown-item dropdown-item-danger">Deconnexion</button>
       </div>
     </div>
@@ -243,6 +244,14 @@
     <p class="section-hint">Les abonnements a relancer : qui expire bientot, qui vient d'expirer, qui s'est inscrit sans payer.</p>
     <div id="renewalSummary" class="stats-grid renewal-summary"></div>
     <div id="renewalLists" class="renewal-lists"></div>
+
+    <h2 class="section-title" style="margin-top:28px;">Retours utilisateurs <span id="feedbackNewCount" class="today-count hidden">0</span></h2>
+    <p class="section-hint">Les messages envoyes depuis « Donner mon avis ». Reponds sur WhatsApp, puis marque-les comme traites.</p>
+    <div class="period-chips" id="feedbackFilter">
+      <button data-feedback-filter="nouveau">A traiter</button>
+      <button data-feedback-filter="all">Tous</button>
+    </div>
+    <div id="feedbackList" class="renewal-lists"></div>
 
     <h2 class="section-title" style="margin-top:28px;">Comptes utilisateurs</h2>
     <p class="section-hint">Active les nouveaux comptes, debloque les comptes verrouilles apres des echecs de connexion repetes.</p>
@@ -545,6 +554,30 @@
   <button class="btn-ghost bulk-close" data-bulk="cancel">Terminer</button>
 </div>
 
+<!-- FEEDBACK MODAL ("Donner mon avis", see js/feedback.js) -->
+<div id="feedbackModal" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>Donner mon avis</h2>
+      <button class="modal-close" data-close><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></span></button>
+    </div>
+    <form id="feedbackForm" class="feedback-form">
+      <p class="section-hint">Un probleme, une idee, une question ? Ton message arrive directement a l'equipe SuiviPro, qui te repond sur WhatsApp.</p>
+      <div class="feedback-types" role="radiogroup" aria-label="Type de message">
+        <label><input type="radio" name="type" value="probleme" required> Un probleme</label>
+        <label><input type="radio" name="type" value="idee"> Une idee de fonctionnalite</label>
+        <label><input type="radio" name="type" value="question"> Une question</label>
+        <label><input type="radio" name="type" value="autre"> Autre chose</label>
+      </div>
+      <label>Ton message
+        <textarea name="message" rows="6" maxlength="2000" required placeholder="Decris ce qui se passe, ou ce que tu aimerais pouvoir faire…"></textarea>
+      </label>
+      <p id="feedbackStatus" class="feedback-status hidden"></p>
+      <button type="submit" class="btn-primary full">Envoyer</button>
+    </form>
+  </div>
+</div>
+
 <!-- SEND TEMPLATED MESSAGE MODAL -->
 <div id="messageModal" class="modal-overlay hidden">
   <div class="modal">
@@ -613,6 +646,7 @@
 <script src="js/templates.js"></script>
 <script src="js/tabs.js"></script>
 <script src="js/admin.js"></script>
+<script src="js/feedback.js"></script>
 <script src="js/forms.js"></script>
 <script src="js/detail.js"></script>
 <script src="js/init.js"></script>
