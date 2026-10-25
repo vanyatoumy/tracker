@@ -68,3 +68,33 @@ test('a create replayed with the same client_ref returns the same contact instea
     assert.notEqual(other.body.id, first.body.id);
     assert.equal((await client.get('/api/prospects')).body.length, 2);
 });
+
+test('clearing a follow-up stores NULL, so it never shows up as a phantom reminder in the bell', async () => {
+    const phone = '+237600666004';
+    db.createUser({ name: 'Cloche', phone, password: PASSWORD });
+    db.setUserActive(phone, true);
+    const client = await loginAs(phone);
+
+    const p = (await client.post('/api/prospects', { name: 'Relance effacee', next_followup_at: '2020-01-01T08:00:00.000Z' })).body;
+    assert.equal((await client.get('/api/reminders')).body.length, 1, 'a real overdue follow-up is counted');
+
+    const cleared = await client.patch(`/api/prospects/${p.id}`, { next_followup_at: null });
+    assert.equal(cleared.body.next_followup_at, null);
+    assert.equal((await client.get('/api/reminders')).body.length, 0);
+});
+
+test("existing '' follow-up dates (left by the old bug) are repaired and never counted", async () => {
+    const phone = '+237600666005';
+    db.createUser({ name: 'Ancienne donnee', phone, password: PASSWORD });
+    db.setUserActive(phone, true);
+    const client = await loginAs(phone);
+    const p = (await client.post('/api/prospects', { name: 'Vide' })).body;
+
+    const raw = new DatabaseSync(process.env.DB_PATH);
+    raw.prepare(`UPDATE prospects SET next_followup_at = '' WHERE id = ?`).run(p.id);
+    assert.equal((await client.get('/api/reminders')).body.length, 0, "the bell ignores '' even before the repair");
+
+    assert.equal(db.repairEmptyDates(), 1);
+    assert.equal(raw.prepare(`SELECT next_followup_at FROM prospects WHERE id = ?`).get(p.id).next_followup_at, null);
+    raw.close();
+});

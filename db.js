@@ -242,7 +242,16 @@ END;
     }
     // Created here, after the column is guaranteed to exist on old databases.
     db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_prospects_client_ref ON prospects(owner_id, client_ref) WHERE client_ref IS NOT NULL;`);
+    repairEmptyDates();
 })();
+
+// Clearing a follow-up date used to store '' instead of NULL (fixed in
+// validate.isoDate) — and '' sorts before every date, so those contacts
+// showed up as overdue in the reminders bell. Normalise any that exist;
+// idempotent and cheap, so it simply runs at every start.
+function repairEmptyDates() {
+    return db.prepare(`UPDATE prospects SET next_followup_at = NULL WHERE next_followup_at = ''`).run().changes;
+}
 
 const STAGES = ['nouveau', 'contacte', 'prospect', 'interesse', 'en_decision', 'client', 'partenaire'];
 const FAILED_LOGIN_LOCK_THRESHOLD = 4; // lock the account after this many consecutive failures
@@ -927,6 +936,7 @@ function getDueReminders(ownerId) {
         WHERE owner_id = ?
           AND is_archived = 0
           AND next_followup_at IS NOT NULL
+          AND next_followup_at != ''
           AND next_followup_at <= ?
         ORDER BY next_followup_at ASC
     `).all(ownerId, nowIso);
@@ -1129,6 +1139,7 @@ function close() {
 
 module.exports = {
     close,
+    repairEmptyDates,
     STAGES,
     INTEREST_TYPES,
     TEMPERATURES,

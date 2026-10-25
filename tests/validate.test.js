@@ -64,3 +64,10 @@ test('isoDate: accepts parseable dates and rejects garbage', () => {
     assert.equal(validate.isoDate('2026-07-18T10:00:00.000Z', 'Date'), '2026-07-18T10:00:00.000Z');
     assert.throws(() => validate.isoDate('not-a-date', 'Date'), /valide/);
 });
+
+test('isoDate: a cleared date becomes null (never an empty string), undefined stays untouched', () => {
+    assert.equal(validate.isoDate(null, 'Date'), null);
+    assert.equal(validate.isoDate('', 'Date'), null);
+    assert.equal(validate.isoDate('   ', 'Date'), null);
+    assert.equal(validate.isoDate(undefined, 'Date'), undefined);
+});

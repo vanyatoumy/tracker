@@ -56,9 +56,13 @@ function oneOf(value, field, allowed, { required = false } = {}) {
     return value;
 }
 
+// A cleared date must be stored as NULL, never '': SQL compares '' as
+// earlier than any date, so `next_followup_at <= now` counted every
+// cleared follow-up as overdue (phantom reminders in the bell).
 function isoDate(value, field, opts = {}) {
     const v = str(value, field, { ...opts, maxLength: 40 });
-    if (!v) return v;
+    if (v === undefined) return undefined;
+    if (!v) return null;
     if (Number.isNaN(Date.parse(v))) {
         throw new ValidationError(`${field} n'est pas une date valide`);
     }
