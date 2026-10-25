@@ -95,9 +95,20 @@ Chaque contact est une carte. Pour le faire avancer :
 
 Chaque changement d'étape est enregistré définitivement dans son historique.
 
-**Indicateur d'ancienneté** : la bordure d'une carte devient orange puis
-rouge si le contact n'a pas bougé depuis plusieurs jours — un signal visuel
-pour repérer les prospects qui stagnent. Les clients et partenaires sont en
+**Couleur des cartes** : la bordure indique depuis quand il ne s'est rien
+passé avec le contact — ni changement d'étape, ni échange noté (appel,
+message, rencontre, note, y compris les messages envoyés depuis les
+modèles) :
+
+| Bordure | Dernière activité |
+|---|---|
+| Grise | il y a moins de 2 jours |
+| Orange | il y a 2 à 5 jours |
+| Rouge | il y a 5 jours ou plus — à relancer |
+| Verte | client ou partenaire (une réussite, pas d'alerte) |
+
+La carte indique aussi « Dernière activité il y a X jours ». Noter un
+échange remet donc la carte au gris, même sans changer d'étape. Les clients et partenaires sont en
 **vert** : ce sont des réussites, pas des contacts qui stagnent. Leur carte
 indique depuis quand ils sont clients et la date du prochain réachat.
 
@@ -301,7 +312,19 @@ paiement) et trois listes à traiter :
 - Réinitialiser le mot de passe d'un compte (déconnecte automatiquement
   toute session active sur ce compte).
 
-## 14. Donner mon avis
+## 14. Visites guidées
+
+La première fois que tu ouvres un écran (Aujourd'hui, Pipeline, la fiche
+d'un contact, Statistiques, et Admin pour les administrateurs), une courte
+visite met en avant ses éléments un par un, avec une explication :
+**"Suivant"**, **"Précédent"**, ou **"Passer la visite"** (touche Échap).
+
+Chaque visite n'est montrée qu'**une fois par compte**, même si tu te
+connectes ensuite sur un autre téléphone. Pour la revoir :
+**"⋮" → "Revoir la visite de cet écran"**, ou le bouton **"?"** en haut de
+la fiche d'un contact.
+
+## 15. Donner mon avis
 
 Menu **"⋮" → "Donner mon avis"** : envoie un **problème**, une **idée de
 fonctionnalité**, une **question** ou autre chose directement à l'équipe

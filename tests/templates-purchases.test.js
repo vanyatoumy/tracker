@@ -146,3 +146,13 @@ test('starter templates: added once, never duplicated, existing names kept as th
     assert.equal(list.find(t => t.name === 'Anniversaire').body, 'Mon propre texte');
     assert.ok(list.every(t => t.body.length > 0));
 });
+
+test('prospects expose last_interaction_at (latest logged exchange), null until the first one', async () => {
+    const client = await freshUser();
+    const p = (await client.post('/api/prospects', { name: 'Activite' })).body;
+    assert.equal(p.last_interaction_at, null);
+    const i1 = (await client.post(`/api/prospects/${p.id}/interactions`, { type: 'appel', content: 'Premier appel' })).body;
+    const i2 = (await client.post(`/api/prospects/${p.id}/interactions`, { type: 'message', content: 'Relance' })).body;
+    const after = (await client.get('/api/prospects')).body.find(x => x.id === p.id);
+    assert.equal(after.last_interaction_at, [i1.created_at, i2.created_at].sort().pop());
+});

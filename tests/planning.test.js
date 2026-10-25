@@ -184,3 +184,20 @@ test('renewalMessage: a free-trial account gets an end-of-trial invitation, not 
     assert.doesNotMatch(msg, /renouveler/);
     assert.match(msg, /Tarif : 2000 FCFA \/ mois\./);
 });
+
+test('lastActivityAt: the later of the last stage change and the last logged exchange', () => {
+    const stageOnly = prospect({ stage_updated_at: daysAgo(10) });
+    assert.equal(Planning.lastActivityAt(stageOnly).toISOString(), daysAgo(10));
+    const recentMessage = prospect({ stage_updated_at: daysAgo(10), last_interaction_at: daysAgo(1) });
+    assert.equal(Planning.lastActivityAt(recentMessage).toISOString(), daysAgo(1));
+    const recentStage = prospect({ stage_updated_at: daysAgo(1), last_interaction_at: daysAgo(10) });
+    assert.equal(Planning.lastActivityAt(recentStage).toISOString(), daysAgo(1));
+});
+
+test('cold: a contact with a recent exchange is not "going cold", even without a stage change', () => {
+    const messagedYesterday = prospect({ stage: 'interesse', stage_updated_at: daysAgo(20), last_interaction_at: daysAgo(1) });
+    const silent = prospect({ stage: 'interesse', stage_updated_at: daysAgo(20), last_interaction_at: daysAgo(15) });
+    const s = Planning.buildToday([messagedYesterday, silent], NOW);
+    assert.deepEqual(ids(s.cold), [silent.id]);
+    assert.equal(s.cold[0].days, 15, 'idle days count from the last activity');
+});

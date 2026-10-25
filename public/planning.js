@@ -30,6 +30,16 @@ const Planning = (() => {
     return Math.floor((startOfDay(to) - startOfDay(from)) / DAY_MS);
   }
 
+  // Last time something happened with this contact: a stage change or a
+  // logged exchange (call, message, meeting, note — templated WhatsApp
+  // messages included). Drives the card colours and the "going cold" rule.
+  function lastActivityAt(p) {
+    const stage = p.stage_updated_at ? new Date(p.stage_updated_at) : null;
+    const exchange = p.last_interaction_at ? new Date(p.last_interaction_at) : null;
+    if (stage && exchange) return stage > exchange ? stage : exchange;
+    return stage || exchange || new Date(p.created_at || Date.now());
+  }
+
   function reorderDueAt(p) {
     if (!p.reorder_interval_days || !p.last_purchase_at) return null;
     if (!CONVERTED_STAGES.includes(p.stage)) return null;
@@ -86,7 +96,7 @@ const Planning = (() => {
       }
       if (followup) continue; // something is already planned for later
       if (IN_PROGRESS_STAGES.includes(p.stage)) {
-        const idleDays = daysBetween(new Date(p.stage_updated_at), now);
+        const idleDays = daysBetween(lastActivityAt(p), now);
         if (idleDays >= COLD_AFTER_DAYS) sections.cold.push({ prospect: p, days: idleDays });
         continue;
       }
@@ -223,6 +233,7 @@ const Planning = (() => {
   return {
     COLD_AFTER_DAYS,
     buildToday,
+    lastActivityAt,
     isBirthdayToday,
     reorderDueAt,
     morningSummaryText,

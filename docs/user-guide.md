@@ -95,8 +95,20 @@ Each contact is a card. To move it forward:
 
 Every stage change is permanently recorded in its history.
 
-**Age indicator**: a card's border turns amber, then red, if the contact
-hasn't moved in several days — a visual cue to spot stalling prospects.
+**Card colours**: the border shows how long nothing has happened with the
+contact — no stage change and no logged exchange (call, message, meeting,
+note, including messages sent from templates):
+
+| Border | Last activity |
+|---|---|
+| Grey | less than 2 days ago |
+| Amber | 2 to 5 days ago |
+| Red | 5 days or more — follow up |
+| Green | client or partner (a win, no alert) |
+
+The card also shows « Dernière activité il y a X jours » (last activity X
+days ago). Logging an exchange turns the card back to grey, even without a
+stage change.
 Clients and partners are **green**: they are wins, not stalling contacts.
 Their card shows how long they've been clients and the next reorder date.
 
@@ -291,7 +303,18 @@ sign-ups not yet paid) and three lists to work through:
 - Reset an account's password (automatically signs out any active session
   on that account).
 
-## 14. Giving feedback
+## 14. Guided tours
+
+The first time you open a screen (Today, Pipeline, a contact's record,
+Statistics, and Admin for admins), a short tour highlights its elements one
+by one with an explanation: **"Suivant"** (Next), **"Précédent"**
+(Previous), or **"Passer la visite"** (Skip, also the Escape key).
+
+Each tour is shown **once per account**, even if you later log in on
+another phone. To see it again: **"⋮" → "Revoir la visite de cet écran"**,
+or the **"?"** button at the top of a contact's record.
+
+## 15. Giving feedback
 
 Menu **"⋮" → "Donner mon avis"** (Give feedback): send a **problem**, a
 **feature idea**, a **question** or anything else straight to the SuiviPro

@@ -434,6 +434,10 @@ const OfflineSync = (() => {
     const item = { id: TEMP_ID_PREFIX + randomUuid(), prospect_id: id, type: payload.type, content: payload.content, created_at: nowIso() };
     row.items = [item, ...row.items];
     await put('interactions', row);
+    // Keep the cached contact's last activity current, so its card colour
+    // and the Today view reflect the exchange right away, offline too.
+    const cached = await getOne('prospects', id);
+    if (cached) await cacheProspect({ ...cached, last_interaction_at: item.created_at });
     await enqueue({ kind: 'interaction', tempId: id.startsWith(TEMP_ID_PREFIX) ? id : null, realId: id.startsWith(TEMP_ID_PREFIX) ? null : id, payload });
     return item;
   }

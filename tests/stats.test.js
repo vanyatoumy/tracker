@@ -122,3 +122,23 @@ test('weekly goal: set on the account, returned by /me, cleared with null', asyn
     assert.equal((await client.patch('/api/auth/me', { weekly_goal: 0 })).status, 400);
     assert.equal((await client.patch('/api/auth/me', { weekly_goal: null })).body.weekly_goal, null);
 });
+
+test('guided tours: marked seen per account, idempotent, returned by /me, validated', async () => {
+    const client = await freshUser();
+    assert.deepEqual((await client.get('/api/auth/me')).body.tours_seen, []);
+
+    const first = await client.patch('/api/auth/me', { tour_seen: 'board' });
+    assert.equal(first.status, 200);
+    assert.deepEqual(first.body.tours_seen, ['board']);
+    await client.patch('/api/auth/me', { tour_seen: 'board' });
+    await client.patch('/api/auth/me', { tour_seen: 'today' });
+    assert.deepEqual((await client.get('/api/auth/me')).body.tours_seen.sort(), ['board', 'today']);
+
+    assert.equal((await client.patch('/api/auth/me', { tour_seen: 'nope' })).status, 400);
+    assert.equal((await client.patch('/api/auth/me', { tour_seen: '' })).status, 400);
+    // Other settings are untouched by a tour update, and vice versa.
+    await client.patch('/api/auth/me', { weekly_goal: 12 });
+    const me = (await client.get('/api/auth/me')).body;
+    assert.equal(me.weekly_goal, 12);
+    assert.deepEqual(me.tours_seen.sort(), ['board', 'today']);
+});

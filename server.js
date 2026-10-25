@@ -172,8 +172,10 @@ function requireAuth(req, res, next) {
         return res.status(401).json({ error: accessError });
     }
     // Feedback stays open during the grace period: a lapsed subscription is
-    // exactly when someone may have a concern to raise.
-    if (req.method !== 'GET' && inSubscriptionGrace(user) && req.path !== '/api/feedback') {
+    // exactly when someone may have a concern to raise. So do the user's own
+    // settings (/api/auth/me: weekly goal, tours seen) — read-only is about
+    // contact data, not preferences.
+    if (req.method !== 'GET' && inSubscriptionGrace(user) && !['/api/feedback', '/api/auth/me'].includes(req.path)) {
         // code lets the mobile offline queue keep (not drop) changes made
         // during the grace period, and replay them once renewed.
         return res.status(403).json({
@@ -309,11 +311,21 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
 });
 
 // The user's own settings — just the weekly activity goal for now.
+// The user's own settings: weekly activity goal, and guided tours seen
+// ({ tour_seen: 'board' } adds one to the account's list — idempotent).
 app.patch('/api/auth/me', requireAuth, (req, res) => {
     try {
-        if (!('weekly_goal' in req.body)) return res.json(req.user);
-        const goal = validate.number(req.body.weekly_goal, "L'objectif hebdomadaire", { min: 1, max: 1000, integer: true });
-        res.json(db.setWeeklyGoal(req.userId, goal ?? null));
+        let user = req.user;
+        if ('weekly_goal' in req.body) {
+            const goal = validate.number(req.body.weekly_goal, "L'objectif hebdomadaire", { min: 1, max: 1000, integer: true });
+            user = db.setWeeklyGoal(req.userId, goal ?? null);
+        }
+        if ('tour_seen' in req.body) {
+            const tour = validate.oneOf(req.body.tour_seen, 'La visite', db.TOUR_IDS, { required: true });
+            if (!tour) throw new ValidationError('La visite est requise');
+            user = db.markTourSeen(req.userId, tour);
+        }
+        res.json(user);
     } catch (err) { handleError(res, err); }
 });
 

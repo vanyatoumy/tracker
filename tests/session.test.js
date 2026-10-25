@@ -118,3 +118,13 @@ test('an active account keeps working normally, and /me returns the user', async
     assert.equal(me.body.phone, phone);
     assert.equal((await client.get('/api/prospects')).status, 200);
 });
+
+test('during the grace period the user can still save their own settings (tours seen, weekly goal)', async () => {
+    const phone = '+237600444007';
+    const user = makeActiveUser('Grace Reglages', phone);
+    const client = await loginAs(phone);
+    setExpiry(user.id, -1 * DAY);
+    assert.equal((await client.post('/api/prospects', { name: 'Bloque' })).status, 403);
+    assert.equal((await client.patch('/api/auth/me', { tour_seen: 'today' })).status, 200);
+    assert.equal((await client.patch('/api/auth/me', { weekly_goal: 10 })).status, 200);
+});

@@ -202,6 +202,11 @@ END;
     if (!cols.includes('subscription_expires_at')) {
         db.exec(`ALTER TABLE users ADD COLUMN subscription_expires_at TEXT;`);
     }
+    if (!cols.includes('tours_seen')) {
+        // JSON array of guided tours the user has finished or skipped
+        // (TOUR_IDS) — per account, so they don't come back on a new phone.
+        db.exec(`ALTER TABLE users ADD COLUMN tours_seen TEXT NOT NULL DEFAULT '[]';`);
+    }
     if (!cols.includes('is_trial')) {
         // 1 while the account runs on its free trial (see startTrial); back
         // to 0 at the first paid activation.
@@ -306,7 +311,31 @@ function findUserByPhone(phone) {
 }
 
 function getUserById(id) {
-    return db.prepare(`SELECT id, name, phone, is_active, is_admin, is_trial, subscription_expires_at, weekly_goal, created_at FROM users WHERE id = ?`).get(id);
+    const user = db.prepare(`SELECT id, name, phone, is_active, is_admin, is_trial, subscription_expires_at, weekly_goal, tours_seen, created_at FROM users WHERE id = ?`).get(id);
+    if (user) user.tours_seen = parseToursSeen(user.tours_seen);
+    return user;
+}
+
+// Guided tours of the frontend (public/js/tour.js), one per screen.
+const TOUR_IDS = ['today', 'board', 'detail', 'stats', 'admin'];
+
+function parseToursSeen(raw) {
+    try {
+        const list = JSON.parse(raw || '[]');
+        return Array.isArray(list) ? list.filter(t => TOUR_IDS.includes(t)) : [];
+    } catch {
+        return [];
+    }
+}
+
+// Idempotent: marking a tour seen twice changes nothing.
+function markTourSeen(userId, tourId) {
+    const row = db.prepare(`SELECT tours_seen FROM users WHERE id = ?`).get(userId);
+    if (!row) throw new NotFoundError('Compte introuvable');
+    const seen = new Set(parseToursSeen(row.tours_seen));
+    seen.add(tourId);
+    db.prepare(`UPDATE users SET tours_seen = ? WHERE id = ?`).run(JSON.stringify([...seen]), userId);
+    return getUserById(userId);
 }
 
 function listAllUsers() {
@@ -619,8 +648,12 @@ function bulkImportProspects(ownerId, contacts) {
 // Every prospect read carries last_purchase_at, so the client can work out
 // reorder reminders from the prospect list alone — including offline, from
 // the cached list (see offline.js).
+// last_interaction_at: with stage_updated_at, it gives the contact's last
+// activity — what the card colours and the "going cold" section measure
+// (a contact you messaged yesterday isn't stalling, even without a stage change).
 const PROSPECT_COLUMNS = `prospects.*,
-    (SELECT MAX(purchased_at) FROM purchases WHERE purchases.prospect_id = prospects.id) AS last_purchase_at`;
+    (SELECT MAX(purchased_at) FROM purchases WHERE purchases.prospect_id = prospects.id) AS last_purchase_at,
+    (SELECT MAX(created_at) FROM interactions WHERE interactions.prospect_id = prospects.id) AS last_interaction_at`;
 
 function getProspect(ownerId, id) {
     return db.prepare(`SELECT ${PROSPECT_COLUMNS} FROM prospects WHERE id = ? AND owner_id = ?`).get(id, ownerId);
@@ -1198,5 +1231,7 @@ module.exports = {
     getCountryStats,
     getActivityStats,
     setWeeklyGoal,
+    TOUR_IDS,
+    markTourSeen,
     backupTo
 };

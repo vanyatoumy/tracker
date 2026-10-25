@@ -242,10 +242,13 @@ const TEMPERATURE_LABELS = { froid: 'Froid', tiede: 'Tiede', chaud: 'Chaud' };
 function renderCard(p) {
   // A client/partner who hasn't "moved" in 60 days isn't going stale — they
   // are a win. The age colours (grey -> amber -> red) only make sense for
-  // contacts still in the pipeline.
+  // contacts still in the pipeline, and measure the last *activity* — stage
+  // change or logged exchange (Planning.lastActivityAt) — so a contact you
+  // messaged yesterday isn't flagged red just because it didn't move stage.
   const isWon = WON_STAGES.includes(p.stage);
+  const lastActivity = Planning.lastActivityAt(p).toISOString();
   const card = document.createElement('div');
-  card.className = `card ${isWon ? 'card-won' : ageClass(p.stage_updated_at)}`;
+  card.className = `card ${isWon ? 'card-won' : ageClass(lastActivity)}`;
   card.dataset.id = p.id;
 
   // No inline onclick="event.stopPropagation()" on these links: the CSP
@@ -274,7 +277,7 @@ function renderCard(p) {
 
   const locationBits = [p.quarter, p.city, p.country].filter(Boolean).join(', ');
 
-  let ageHtml = `<span>${relativeTime(p.stage_updated_at)}</span>`;
+  let ageHtml = `<span title="Changement d'étape ou échange noté (appel, message, rencontre, note)">Dernière activité ${relativeTime(lastActivity)}</span>`;
   if (isWon) {
     const stageLabel = STAGES.find(s => s.key === p.stage).label;
     const days = Math.floor(daysSince(p.stage_updated_at));

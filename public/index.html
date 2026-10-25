@@ -145,6 +145,7 @@
         <button id="morningToggleBtn" class="dropdown-item hidden">Resume du matin (8h)</button>
         <button id="subscriptionBtn" class="dropdown-item">Mon abonnement</button>
         <button id="feedbackBtn" class="dropdown-item" data-requires-online>Donner mon avis</button>
+        <button id="replayTourBtn" class="dropdown-item">Revoir la visite de cet écran</button>
         <button id="logoutBtn" class="dropdown-item dropdown-item-danger">Deconnexion</button>
       </div>
     </div>
@@ -382,6 +383,7 @@
         <p class="detail-sub" id="detailSub">—</p>
       </div>
       <div class="modal-header-actions">
+        <button id="detailTourBtn" class="btn-icon tour-help" title="Revoir la visite de cette fiche" aria-label="Revoir la visite de cette fiche">?</button>
         <button id="detailTemplateBtn" class="btn-ghost hidden" title="Envoyer un message type sur WhatsApp">Message type</button>
         <a id="detailWaBtn" class="btn-whatsapp hidden" href="#" target="_blank" rel="noopener" title="Contacter sur WhatsApp"><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"/></svg></span> <span class="btn-label">Contacter sur WhatsApp</span></a>
         <button class="modal-close" data-close><span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></span></button>
@@ -649,6 +651,7 @@
 <script src="js/feedback.js"></script>
 <script src="js/forms.js"></script>
 <script src="js/detail.js"></script>
+<script src="js/tour.js"></script>
 <script src="js/init.js"></script>
 </body>
 </html>

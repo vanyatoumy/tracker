@@ -74,7 +74,9 @@ unique login identifier. Password: `password_hash` + `password_salt` via
 bcrypt). `is_active` (defaults to 0 at signup — requires manual
 activation, except with the free trial — see below), `is_admin`, `is_trial`
 (1 during the free trial), `subscription_expires_at`, `weekly_goal` (actions
-per week, statistics). The legacy `failed_login_attempts` / `locked_until`
+per week, statistics), `tours_seen` (JSON: guided tours already seen,
+`TOUR_IDS` — marked via `PATCH /api/auth/me { tour_seen }`, allowed even
+during the grace period). The legacy `failed_login_attempts` / `locked_until`
 columns are no longer read (superseded by `login_failures`).
 
 **`login_failures`** — failed logins per (`user_id`, `ip`) pair:
@@ -94,8 +96,11 @@ the 7 pipeline values (`nouveau`, `contacte`, `prospect`, `interesse`,
 `birthday` (`YYYY-MM-DD`, 1904 = unknown year), `temperature` (`froid` /
 `tiede` / `chaud`), `reorder_interval_days` (reorder reminder),
 `client_ref` (idempotency key for creates replayed from the offline queue —
-unique index on `(owner_id, client_ref)`). Reads add a computed
-`last_purchase_at`.
+unique index on `(owner_id, client_ref)`). Reads add computed
+`last_purchase_at` and `last_interaction_at` (latest logged exchange). With
+`stage_updated_at`, the latter gives the contact's "last activity"
+(`Planning.lastActivityAt`), which drives the card colours and the "going
+cold" section.
 
 **`stage_history`** — an append-only log of every stage transition.
 **Important**: application code never writes `prospects.stage` directly.
@@ -183,7 +188,8 @@ to_stage)` — sized for the frontend's filtering and stats queries.
 
 No framework, no build step. The code is split into classic scripts in
 `public/js/` (`core`, `auth`, `notifications`, `shell`, `board`, `data`,
-`today`, `templates`, `tabs`, `admin`, `forms`, `detail`, `init`), loaded
+`today`, `templates`, `tabs`, `admin`, `feedback`, `forms`, `detail`, `tour`
+(guided tours), `init`), loaded
 **in that order** by `index.html` and sharing one global scope: code that
 runs at load time only sees earlier files, and `init.js` must stay last
 (a test checks this). DOM-free rules live in `public/planning.js`

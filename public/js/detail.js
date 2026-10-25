@@ -120,6 +120,7 @@ async function openDetail(id) {
   await loadHistory(id);
 
   detailModal.classList.remove('hidden');
+  maybeStartTour('detail'); // js/tour.js — first contact record opened only
 }
 
 document.getElementById('detailTemplateBtn').addEventListener('click', () => {

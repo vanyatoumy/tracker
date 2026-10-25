@@ -11,7 +11,7 @@ const TODAY_SECTIONS = [
   { key: 'overdue', title: 'Relances en retard' },
   { key: 'today', title: "Relances d'aujourd'hui" },
   { key: 'reorders', title: 'Reachats a proposer', hint: 'Clients dont le delai de reachat est atteint.' },
-  { key: 'cold', title: 'Contacts qui refroidissent', hint: `Sans mouvement depuis ${Planning.COLD_AFTER_DAYS} jours ou plus, et aucune relance prevue.` },
+  { key: 'cold', title: 'Contacts qui refroidissent', hint: `Aucun echange ni changement d'etape depuis ${Planning.COLD_AFTER_DAYS} jours ou plus, et aucune relance prevue.` },
   { key: 'untouched', title: 'Jamais contactes', hint: 'Nouveaux contacts sans relance prevue.' }
 ];
 // Long sections (e.g. hundreds of imported, never-contacted contacts) show
@@ -125,7 +125,7 @@ function todayItemDetail(sectionKey, item) {
       return `Dernier achat le ${new Date(p.last_purchase_at).toLocaleDateString('fr-FR')} · ` +
         (item.days <= 0 ? "reachat prevu aujourd'hui" : `reachat depasse de ${item.days} j`);
     case 'cold':
-      return `${STAGES.find(s => s.key === p.stage)?.label || p.stage} · sans mouvement depuis ${item.days} j`;
+      return `${STAGES.find(s => s.key === p.stage)?.label || p.stage} · aucune activite depuis ${item.days} j`;
     case 'untouched':
       return item.days === 0 ? "Ajoute aujourd'hui" : `Ajoute il y a ${item.days} j`;
     default:

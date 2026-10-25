@@ -243,9 +243,14 @@ async function bootApp() {
   await refreshAll();
   startLiveRefresh();
 
+  // Guided tours (js/tour.js): send any "seen" marks left pending offline,
+  // then show the tour of the screen we land on, if not seen yet.
+  flushPendingTours();
   if (pendingNotificationProspectId) {
     const id = pendingNotificationProspectId;
     pendingNotificationProspectId = null;
     await openDetail(id);
+  } else {
+    maybeStartTour(document.querySelector('.tab-btn.active')?.dataset.view);
   }
 }

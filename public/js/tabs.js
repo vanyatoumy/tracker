@@ -20,6 +20,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     if (view === 'archived') await loadArchived();
     if (view === 'board') await loadProspects();
     if (view === 'admin') await loadAdminUsers();
+    maybeStartTour(view); // js/tour.js — first visit of this screen only
   });
 });
 

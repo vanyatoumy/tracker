@@ -76,7 +76,9 @@ d'identifiant de connexion, unique. Mot de passe : `password_hash` +
 externe type bcrypt). `is_active` (0 par défaut à l'inscription — activation
 manuelle requise, sauf essai gratuit — voir ci-dessous), `is_admin`,
 `is_trial` (1 pendant l'essai gratuit), `subscription_expires_at`, `weekly_goal`
-(objectif d'actions par semaine, statistiques). Les colonnes historiques
+(objectif d'actions par semaine, statistiques), `tours_seen` (JSON : visites
+guidées déjà vues, `TOUR_IDS` — marquées via `PATCH /api/auth/me
+{ tour_seen }`, permis même pendant le délai de grâce). Les colonnes historiques
 `failed_login_attempts` / `locked_until` ne sont plus lues (remplacées par
 `login_failures`).
 
@@ -98,7 +100,10 @@ plutôt qu'une suppression physique. Autres colonnes : `birthday`
 `chaud`), `reorder_interval_days` (rappel de réachat), `client_ref` (clé
 d'idempotence des créations rejouées depuis la file hors ligne — index
 unique `(owner_id, client_ref)`). Les lectures ajoutent `last_purchase_at`
-(date du dernier achat, calculée).
+(date du dernier achat) et `last_interaction_at` (dernier échange noté),
+calculées. Avec `stage_updated_at`, cette dernière donne la « dernière
+activité » du contact (`Planning.lastActivityAt`) qui pilote la couleur des
+cartes et la section « Contacts qui refroidissent ».
 
 **`stage_history`** — journal append-only de toute transition d'étape.
 **Important** : le code applicatif n'écrit jamais directement
@@ -191,8 +196,8 @@ frontend.
 
 Pas de framework, pas de build step. Le code est découpé en scripts
 classiques dans `public/js/` (`core`, `auth`, `notifications`, `shell`,
-`board`, `data`, `today`, `templates`, `tabs`, `admin`, `forms`, `detail`,
-`init`), chargés **dans cet ordre** par `index.html` et partageant une
+`board`, `data`, `today`, `templates`, `tabs`, `admin`, `feedback`, `forms`,
+`detail`, `tour` (visites guidées), `init`), chargés **dans cet ordre** par `index.html` et partageant une
 seule portée globale : le code exécuté au chargement ne voit que les
 fichiers précédents, et `init.js` doit rester le dernier (un test le
 vérifie). Les règles sans DOM vivent dans `public/planning.js` (testé
