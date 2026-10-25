@@ -72,7 +72,8 @@ columns added since are migrated automatically by idempotent
 unique login identifier. Password: `password_hash` + `password_salt` via
 `scrypt` (Node's built-in `crypto` module, no external dependency like
 bcrypt). `is_active` (defaults to 0 at signup — requires manual
-activation), `is_admin`, `subscription_expires_at`, `weekly_goal` (actions
+activation, except with the free trial — see below), `is_admin`, `is_trial`
+(1 during the free trial), `subscription_expires_at`, `weekly_goal` (actions
 per week, statistics). The legacy `failed_login_attempts` / `locked_until`
 columns are no longer read (superseded by `login_failures`).
 
@@ -139,6 +140,11 @@ to_stage)` — sized for the frontend's filtering and stats queries.
   response's JSON body. The mobile client then sends it back as
   `Authorization: Bearer <token>` on every request. Since no cookie
   crosses the boundary, `Access-Control-Allow-Credentials` isn't needed.
+- **Free trial** (`FREE_TRIAL_DAYS`, 30 by default, 0 = off): on sign-up
+  the account is activated for that long (`is_trial = 1`) and a session is
+  opened right away (like a login). The first admin activation (payment)
+  sets `is_trial` back to 0. From then on, same path as a subscription:
+  expiry, grace period, reminder.
 - **Inactive accounts / subscription**: login fails until an admin
   activates the account (`users.is_active`) or once
   `subscription_expires_at` has passed. This check runs again **on every

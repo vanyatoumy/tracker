@@ -16,12 +16,19 @@ and the steps to get started) next to two tabs:
 - **Créer un compte** (Create account): full name, phone number, password
   (6 characters minimum).
 
-New accounts are created **inactive**: pay the subscription (instructions
-under **"⋮" → "Mon abonnement"** or from your admin), then the admin
-activates your account. Each activation grants access for a fixed period
-(30 days by default).
+**Free trial**: on sign-up, your account is **active right away for 1
+month**, with no payment and no wait for the admin — you're logged in
+directly. The trial days left show at the top of the screen, and
+**"⋮" → "Mon abonnement"** explains how to subscribe afterwards.
 
-When the subscription expires, you get **3 days of grace**: the account
+To subscribe (or renew), pay as described in **"Mon abonnement"**, then the
+admin activates your account. Each activation grants access for a fixed
+period (30 days by default).
+
+(If the admin turned the free trial off, new accounts are created inactive
+and activated after payment.)
+
+When the subscription (or the free trial) expires, you get **3 days of grace**: the account
 stays viewable **read-only**, with a red banner and a "Comment renouveler"
 (How to renew) button. On the mobile app, changes made offline during those
 days are kept and synced once renewed. After that, access stops. An
@@ -265,6 +272,8 @@ sign-ups not yet paid) and three lists to work through:
 - **Expirent bientôt** (Expiring soon) and **Expirés récemment** (Recently
   expired): a **"Relancer"** (Remind) button opens WhatsApp with a ready
   message (expiry date, price and payment instructions set in `.env`).
+  **Free-trial** accounts carry an "Essai gratuit" tag and get an
+  invitation to subscribe rather than a renewal reminder.
 - **Inscrits, en attente de paiement** (Signed up, awaiting payment — last
   30 days, never activated): **"Envoyer les instructions"** (Send
   instructions) button.

@@ -1,3 +1,7 @@
+// This file covers the no-trial setup (FREE_TRIAL_DAYS=0): sign-ups wait
+// for the admin's activation. The free-trial flow is in trial.test.js.
+process.env.FREE_TRIAL_DAYS = '0';
+
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { startServer, stopServer, makeClient } = require('./helpers');

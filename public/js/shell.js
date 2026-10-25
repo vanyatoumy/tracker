@@ -194,10 +194,13 @@ async function renderGraceBanner() {
   try { graceDays = (await api('/api/subscription/info')).grace_days ?? graceDays; } catch { /* offline: default */ }
   const until = new Date(expiresAt.getTime() + graceDays * 24 * 60 * 60 * 1000);
   const fmt = d => d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' });
-  banner.innerHTML = `
-    <span><strong>Ton abonnement a expiré le ${escapeHtml(fmt(expiresAt))}.</strong>
-    Ton compte est en lecture seule jusqu'au ${escapeHtml(fmt(until))}, puis l'accès sera coupé. Renouvelle-le pour continuer à travailler.</span>
-    <button class="btn-primary" data-grace-renew>Comment renouveler</button>`;
+  banner.innerHTML = currentUser.is_trial
+    ? `<span><strong>Ton essai gratuit s'est terminé le ${escapeHtml(fmt(expiresAt))}.</strong>
+       Ton compte est en lecture seule jusqu'au ${escapeHtml(fmt(until))} : abonne-toi pour garder tes contacts et continuer à travailler.</span>
+       <button class="btn-primary" data-grace-renew>M'abonner</button>`
+    : `<span><strong>Ton abonnement a expiré le ${escapeHtml(fmt(expiresAt))}.</strong>
+       Ton compte est en lecture seule jusqu'au ${escapeHtml(fmt(until))}, puis l'accès sera coupé. Renouvelle-le pour continuer à travailler.</span>
+       <button class="btn-primary" data-grace-renew>Comment renouveler</button>`;
   banner.classList.remove('hidden');
 }
 
@@ -214,8 +217,14 @@ async function bootApp() {
   // server.js), this is purely a heads-up while the current session is
   // still valid.
   const daysLeft = subscriptionDaysLeft(currentUser?.subscription_expires_at);
-  if (currentUser && daysLeft !== null && daysLeft <= 5) {
-    userInfoEl.textContent += ` · Abonnement : ${daysLeft <= 0 ? 'expire' : daysLeft + ' jour' + (daysLeft > 1 ? 's' : '') + ' restant' + (daysLeft > 1 ? 's' : '')}`;
+  const daysText = d => `${d} jour${d > 1 ? 's' : ''} restant${d > 1 ? 's' : ''}`;
+  if (currentUser?.is_trial && daysLeft !== null && daysLeft > 0) {
+    // Free trial: always shown (it's a countdown the user should see),
+    // highlighted in the last 5 days.
+    userInfoEl.textContent += ` · Essai gratuit : ${daysText(daysLeft)}`;
+    userInfoEl.classList.toggle('subscription-warning', daysLeft <= 5);
+  } else if (currentUser && daysLeft !== null && daysLeft <= 5) {
+    userInfoEl.textContent += ` · ${currentUser.is_trial ? 'Essai gratuit' : 'Abonnement'} : ${daysLeft <= 0 ? 'termine' : daysText(daysLeft)}`;
     userInfoEl.classList.add('subscription-warning');
   } else {
     userInfoEl.classList.remove('subscription-warning');

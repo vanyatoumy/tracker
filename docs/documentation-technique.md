@@ -74,7 +74,8 @@ colonnes ajoutées depuis sont migrées automatiquement par des
 d'identifiant de connexion, unique. Mot de passe : `password_hash` +
 `password_salt` via `scrypt` (module `crypto` natif, pas de dépendance
 externe type bcrypt). `is_active` (0 par défaut à l'inscription — activation
-manuelle requise), `is_admin`, `subscription_expires_at`, `weekly_goal`
+manuelle requise, sauf essai gratuit — voir ci-dessous), `is_admin`,
+`is_trial` (1 pendant l'essai gratuit), `subscription_expires_at`, `weekly_goal`
 (objectif d'actions par semaine, statistiques). Les colonnes historiques
 `failed_login_attempts` / `locked_until` ne sont plus lues (remplacées par
 `login_failures`).
@@ -146,6 +147,11 @@ frontend.
   `Authorization: Bearer <token>` sur chaque requête. Comme aucun cookie ne
   traverse la frontière, `Access-Control-Allow-Credentials` n'est pas
   nécessaire.
+- **Essai gratuit** (`FREE_TRIAL_DAYS`, 30 par défaut, 0 = désactivé) : à
+  l'inscription, le compte est activé pour cette durée (`is_trial = 1`) et
+  une session est ouverte immédiatement (comme un login). La première
+  activation par un admin (paiement) remet `is_trial` à 0. Ensuite, même
+  chemin qu'un abonnement : expiration, délai de grâce, relance.
 - **Comptes inactifs / abonnement** : le login échoue tant qu'un admin n'a
   pas activé le compte (`users.is_active`) ou si `subscription_expires_at`
   est dépassée. Ce contrôle est refait **à chaque requête** dans

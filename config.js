@@ -60,6 +60,11 @@ module.exports = {
     // auto-deactivated on next login attempt.
     SUBSCRIPTION_DURATION_DAYS: parseInt10(process.env.SUBSCRIPTION_DURATION_DAYS, 30),
 
+    // Free trial: a new sign-up is activated straight away for this many
+    // days, no payment or admin action needed. 0 = no trial: accounts are
+    // created inactive and wait for the admin's activation, as before.
+    FREE_TRIAL_DAYS: parseInt10(process.env.FREE_TRIAL_DAYS, 30),
+
     // Grace period after expiry: the account stays readable (no changes
     // allowed) for this many days, with a renewal banner, before access is
     // cut off entirely. 0 = cut off at expiry, as before.

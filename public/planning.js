@@ -172,14 +172,23 @@ const Planning = (() => {
     const first = (user.name || '').trim().split(/\s+/)[0] || '';
     const at = new Date(user.subscription_expires_at);
     const date = at.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' });
-    const lines = [
-      at < now
-        ? `Bonjour ${first}, ton abonnement Suivi Prospection a expire le ${date}.`
-        : `Bonjour ${first}, ton abonnement Suivi Prospection expire le ${date}.`,
-      at < now
-        ? 'Pour retrouver ton acces et tous tes contacts, il suffit de le renouveler.'
-        : 'Pour continuer sans interruption, pense a le renouveler.'
-    ];
+    // A free-trial account (is_trial) is converting, not renewing: different
+    // wording, and an invitation rather than a reminder.
+    const lines = user.is_trial
+      ? [
+        at < now
+          ? `Bonjour ${first}, ton essai gratuit de Suivi Prospection s'est termine le ${date}.`
+          : `Bonjour ${first}, ton essai gratuit de Suivi Prospection se termine le ${date}.`,
+        'J\'espere que l\'outil t\'aide dans ta prospection ! Pour continuer avec tous tes contacts et ton historique, il suffit de t\'abonner.'
+      ]
+      : [
+        at < now
+          ? `Bonjour ${first}, ton abonnement Suivi Prospection a expire le ${date}.`
+          : `Bonjour ${first}, ton abonnement Suivi Prospection expire le ${date}.`,
+        at < now
+          ? 'Pour retrouver ton acces et tous tes contacts, il suffit de le renouveler.'
+          : 'Pour continuer sans interruption, pense a le renouveler.'
+      ];
     if (info.price) lines.push(`Tarif : ${info.price}.`);
     if (info.instructions) lines.push(info.instructions);
     lines.push('Merci et bonne prospection !');

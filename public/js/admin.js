@@ -24,8 +24,9 @@ function renewalRow(entry, kind) {
   const when = kind === 'soon' ? `Expire ${entry.days <= 1 ? 'demain' : `dans ${entry.days} j`} (${dateStr})`
     : kind === 'expired' ? `Expire depuis ${entry.days === 0 ? "aujourd'hui" : `${entry.days} j`} (${dateStr})`
     : `Inscrit ${entry.days === 0 ? "aujourd'hui" : `il y a ${entry.days} j`}, jamais active`;
-  const reminded = u.renewal_reminded_at && daysSince(u.renewal_reminded_at) < REMINDER_FRESH_DAYS
-    ? `<span class="tag reminded">Relance ${relativeTime(u.renewal_reminded_at)}</span>` : '';
+  const reminded = (u.renewal_reminded_at && daysSince(u.renewal_reminded_at) < REMINDER_FRESH_DAYS
+    ? `<span class="tag reminded">Relance ${relativeTime(u.renewal_reminded_at)}</span>` : '')
+    + (u.is_trial ? ' <span class="tag trial">Essai gratuit</span>' : '');
   return `
     <div class="renewal-item renewal-${kind}">
       <div class="renewal-main">
@@ -117,7 +118,7 @@ async function loadAdminUsers() {
       <td>${escapeHtml(u.name)}${u.is_admin ? ` <span title="Administrateur">${icon('crown')}</span>` : ''}</td>
       <td>${escapeHtml(u.phone)}</td>
       <td>${u.is_active ? 'Actif' : 'Inactif'}</td>
-      <td>${subscriptionCellText(u.subscription_expires_at)}</td>
+      <td>${subscriptionCellText(u.subscription_expires_at, !!u.is_trial)}</td>
       <td>${isLocked ? `Verrouille jusqu'a ${new Date(u.locked_until).toLocaleString('fr-FR')}` : '—'}</td>
       <td>${new Date(u.created_at).toLocaleDateString('fr-FR')}</td>
       <td class="admin-actions"></td>

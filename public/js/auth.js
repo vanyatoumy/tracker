@@ -42,31 +42,38 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
   const phone = fd.get('phone');
   const password = fd.get('password');
   try {
-    currentUser = await api('/api/auth/login', {
+    const user = await api('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify({ phone, password })
     });
-    // Remembered so the phone number is prefilled next time — deliberately
-    // never the password, see the prefill code near the bottom of this file.
-    localStorage.setItem('lastLoginPhone', phone);
-    // Succeeds whether this came from the real server or (offline) from a
-    // previously cached verifier — either way, refresh the local verifier
-    // so it always reflects the last password actually used successfully.
-    if (typeof OfflineSync !== 'undefined' && OfflineSync.enabled) {
-      await OfflineSync.cacheLoginCredential(phone, password, currentUser);
-      // Only a real online login returns a fresh session token — offline
-      // login just re-verifies the cached password locally (see
-      // verifyOfflineLogin in offline.js) and can't obtain a new one. Skip
-      // the call entirely in that case, rather than passing something
-      // falsy, so whatever token is already cached from the last online
-      // login is left untouched instead of being wiped.
-      if (currentUser.token) await OfflineSync.setToken(currentUser.token);
-    }
-    await bootApp();
+    await enterApp(user, phone, password);
   } catch (err) {
     errEl.textContent = err.message;
   }
 });
+
+// Shared by login and by sign-up when the free trial logs the person
+// straight in.
+async function enterApp(user, phone, password) {
+  currentUser = user;
+  // Remembered so the phone number is prefilled next time — deliberately
+  // never the password, see the prefill code near the bottom of this file.
+  localStorage.setItem('lastLoginPhone', phone);
+  // Succeeds whether this came from the real server or (offline) from a
+  // previously cached verifier — either way, refresh the local verifier
+  // so it always reflects the last password actually used successfully.
+  if (typeof OfflineSync !== 'undefined' && OfflineSync.enabled) {
+    await OfflineSync.cacheLoginCredential(phone, password, currentUser);
+    // Only a real online login returns a fresh session token — offline
+    // login just re-verifies the cached password locally (see
+    // verifyOfflineLogin in offline.js) and can't obtain a new one. Skip
+    // the call entirely in that case, rather than passing something
+    // falsy, so whatever token is already cached from the last online
+    // login is left untouched instead of being wiped.
+    if (currentUser.token) await OfflineSync.setToken(currentUser.token);
+  }
+  await bootApp();
+}
 
 document.getElementById('registerForm').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -78,9 +85,17 @@ document.getElementById('registerForm').addEventListener('submit', async (e) => 
       method: 'POST',
       body: JSON.stringify({ name: fd.get('name'), phone: fd.get('phone'), password: fd.get('password') })
     });
-    // Accounts are created inactive and need admin activation — no session is
-    // issued at registration time, so don't try to boot the app here. Switch
-    // to the login tab and show the activation notice there instead.
+    // Free trial on (server config): the account is active and the session
+    // already open — straight into the app (the getting-started card on the
+    // Today view takes it from there).
+    if (result.logged_in) {
+      e.target.reset();
+      await enterApp(result, fd.get('phone'), fd.get('password'));
+      return;
+    }
+    // No trial: the account is created inactive and needs admin activation
+    // — no session was issued. Switch to the login tab and show the
+    // activation notice there instead.
     e.target.reset();
     document.querySelector('.auth-tab-btn[data-auth="login"]').click();
     let message = result.message || 'Compte cree. Il doit etre active par un administrateur avant que tu puisses te connecter.';

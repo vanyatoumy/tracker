@@ -1027,6 +1027,7 @@ textarea { resize: vertical; min-height: 64px; }
 .renewal-actions { display: flex; gap: 8px; flex: 0 0 auto; }
 .renewal-actions .btn-ghost { padding: 8px 12px; font-size: 12px; }
 .tag.reminded { border-color: #1f7a3d; color: var(--green); margin-left: 4px; }
+.tag.trial { border-color: #2e5a87; color: #8cc0ff; }
 
 /* ---------- Feedback: user form + admin list ---------- */
 .feedback-form .section-hint { margin: 0; }

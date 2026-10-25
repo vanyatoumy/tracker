@@ -31,13 +31,14 @@ function subscriptionDaysLeft(expiresAt) {
   return Math.ceil((new Date(expiresAt) - new Date()) / (24 * 60 * 60 * 1000));
 }
 
-function subscriptionCellText(expiresAt) {
+function subscriptionCellText(expiresAt, isTrial = false) {
   if (!expiresAt) return '—';
   const days = subscriptionDaysLeft(expiresAt);
   const dateStr = new Date(expiresAt).toLocaleDateString('fr-FR');
-  if (days < 0) return `Expire depuis le ${dateStr}`;
-  if (days === 0) return `Expire aujourd'hui (${dateStr})`;
-  return `${dateStr} (${days} jour${days > 1 ? 's' : ''})`;
+  const suffix = isTrial ? ' · essai gratuit' : '';
+  if (days < 0) return `Expire depuis le ${dateStr}${suffix}`;
+  if (days === 0) return `Expire aujourd'hui (${dateStr})${suffix}`;
+  return `${dateStr} (${days} jour${days > 1 ? 's' : ''})${suffix}`;
 }
 
 document.getElementById('subscriptionBtn').addEventListener('click', async () => {
@@ -48,12 +49,18 @@ document.getElementById('subscriptionBtn').addEventListener('click', async () =>
   document.getElementById('subscriptionModal').classList.remove('hidden');
 
   const days = subscriptionDaysLeft(currentUser?.subscription_expires_at);
+  const until = currentUser?.subscription_expires_at ? new Date(currentUser.subscription_expires_at).toLocaleDateString('fr-FR') : '';
+  const left = `${days} jour${days > 1 ? 's' : ''} restant${days > 1 ? 's' : ''}`;
   if (days === null) {
     statusEl.textContent = "Aucun abonnement actif pour l'instant.";
+  } else if (currentUser.is_trial) {
+    statusEl.textContent = days < 0
+      ? `Ton essai gratuit s'est termine le ${until}. Abonne-toi pour continuer a utiliser SuiviPro :`
+      : `Tu profites de l'essai gratuit jusqu'au ${until} (${left}). Pour continuer ensuite, il suffit de t'abonner :`;
   } else if (days < 0) {
-    statusEl.textContent = `Ton abonnement a expire le ${new Date(currentUser.subscription_expires_at).toLocaleDateString('fr-FR')}.`;
+    statusEl.textContent = `Ton abonnement a expire le ${until}.`;
   } else {
-    statusEl.textContent = `Abonnement actif jusqu'au ${new Date(currentUser.subscription_expires_at).toLocaleDateString('fr-FR')} (${days} jour${days > 1 ? 's' : ''} restant${days > 1 ? 's' : ''}).`;
+    statusEl.textContent = `Abonnement actif jusqu'au ${until} (${left}).`;
   }
 
   try {

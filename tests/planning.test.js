@@ -174,3 +174,13 @@ test('morningSummaryText: counts what the Today view will show at that moment, n
         "Aujourd'hui : 2 relances, 1 anniversaire, 1 reachat a proposer.");
     assert.equal(Planning.morningSummaryText([prospect({})], tomorrow8), null, 'only a never-contacted contact: no ping');
 });
+
+test('renewalMessage: a free-trial account gets an end-of-trial invitation, not a renewal reminder', () => {
+    const msg = Planning.renewalMessage(
+        { name: 'Nina Kamga', is_trial: 1, subscription_expires_at: new Date(2026, 9, 25, 12).toISOString() },
+        { price: '2000 FCFA / mois' }, NOW);
+    assert.match(msg, /^Bonjour Nina, ton essai gratuit de Suivi Prospection se termine le 25 octobre\./);
+    assert.match(msg, /il suffit de t'abonner/);
+    assert.doesNotMatch(msg, /renouveler/);
+    assert.match(msg, /Tarif : 2000 FCFA \/ mois\./);
+});

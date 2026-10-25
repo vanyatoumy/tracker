@@ -202,6 +202,11 @@ END;
     if (!cols.includes('subscription_expires_at')) {
         db.exec(`ALTER TABLE users ADD COLUMN subscription_expires_at TEXT;`);
     }
+    if (!cols.includes('is_trial')) {
+        // 1 while the account runs on its free trial (see startTrial); back
+        // to 0 at the first paid activation.
+        db.exec(`ALTER TABLE users ADD COLUMN is_trial INTEGER NOT NULL DEFAULT 0;`);
+    }
     if (!cols.includes('renewal_reminded_at')) {
         // When an admin last sent this user a renewal reminder (admin view).
         db.exec(`ALTER TABLE users ADD COLUMN renewal_reminded_at TEXT;`);
@@ -292,7 +297,7 @@ function findUserByPhone(phone) {
 }
 
 function getUserById(id) {
-    return db.prepare(`SELECT id, name, phone, is_active, is_admin, subscription_expires_at, weekly_goal, created_at FROM users WHERE id = ?`).get(id);
+    return db.prepare(`SELECT id, name, phone, is_active, is_admin, is_trial, subscription_expires_at, weekly_goal, created_at FROM users WHERE id = ?`).get(id);
 }
 
 function listAllUsers() {
@@ -306,7 +311,7 @@ function listAllUsers() {
 // locked out of this account somewhere".
 function adminListUsers() {
     return db.prepare(`
-        SELECT id, name, phone, is_active, is_admin, subscription_expires_at, renewal_reminded_at, created_at,
+        SELECT id, name, phone, is_active, is_admin, is_trial, subscription_expires_at, renewal_reminded_at, created_at,
             (SELECT COALESCE(SUM(attempts), 0) FROM login_failures lf WHERE lf.user_id = users.id) AS failed_login_attempts,
             (SELECT MAX(locked_until) FROM login_failures lf WHERE lf.user_id = users.id AND lf.locked_until > ?) AS locked_until
         FROM users ORDER BY created_at ASC
@@ -376,6 +381,8 @@ function setUserActiveById(userId, active) {
     if (!user) throw new NotFoundError('Compte introuvable');
     const expiresAt = active ? subscriptionExpiryFromNow() : user.subscription_expires_at;
     db.prepare(`UPDATE users SET is_active = ?, subscription_expires_at = ? WHERE id = ?`).run(active ? 1 : 0, expiresAt, userId);
+    // An admin activation is a paid period: it ends any free trial.
+    if (active) db.prepare(`UPDATE users SET is_trial = 0 WHERE id = ?`).run(userId);
     if (active) {
         // Activating a previously-blocked account should also clear any
         // lockout left over from failed attempts, so it isn't immediately
@@ -387,6 +394,15 @@ function setUserActiveById(userId, active) {
         deleteSessionsForUser(userId);
     }
     return { id: user.id, name: user.name, phone: user.phone, is_active: active ? 1 : 0, subscription_expires_at: expiresAt };
+}
+
+// Free trial for a new sign-up (config.FREE_TRIAL_DAYS): active right away,
+// expiring after `days` days — the same expiry / grace / renewal path as a
+// paid period, just flagged is_trial so the wording can say "essai".
+function startTrial(userId, days) {
+    const expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+    db.prepare(`UPDATE users SET is_active = 1, is_trial = 1, subscription_expires_at = ? WHERE id = ?`).run(expiresAt, userId);
+    return getUserById(userId);
 }
 
 function unlockUserById(userId) {
@@ -1127,6 +1143,7 @@ module.exports = {
     setUserAdmin,
     setUserActive,
     setUserActiveById,
+    startTrial,
     unlockUserById,
     resetPasswordById,
     getLoginLockedUntil,

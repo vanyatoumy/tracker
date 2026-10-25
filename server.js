@@ -207,6 +207,7 @@ app.get('/api/subscription/info', (req, res) => {
         price: config.SUBSCRIPTION_PRICE,
         duration_days: config.SUBSCRIPTION_DURATION_DAYS,
         grace_days: config.SUBSCRIPTION_GRACE_DAYS,
+        trial_days: config.FREE_TRIAL_DAYS,
         instructions: config.SUBSCRIPTION_PAYMENT_INSTRUCTIONS,
         contact: config.SUBSCRIPTION_CONTACT
     });
@@ -221,14 +222,25 @@ app.post('/api/auth/register', authLimiter, (req, res) => {
             throw new ValidationError('Mot de passe : 6 a 200 caracteres');
         }
 
-        // New accounts are created inactive (see db.js) and can't log in until an
-        // admin activates them via scripts/activate-account.js — no admin dashboard
-        // yet. So, unlike before, registration does NOT auto-login: creating a
-        // session here would let an inactive account straight into the app,
-        // defeating the activation gate entirely.
         const user = db.createUser({ name, phone, password });
+
+        // Free trial on: the account is active for FREE_TRIAL_DAYS straight
+        // away, so sign-up logs the person in like a login would.
+        if (config.FREE_TRIAL_DAYS > 0) {
+            const trialUser = db.startTrial(user.id, config.FREE_TRIAL_DAYS);
+            return res.status(201).json({
+                ...openSession(req, res, trialUser),
+                logged_in: true,
+                message: `Bienvenue ! Ton essai gratuit de ${config.FREE_TRIAL_DAYS} jours commence maintenant.`
+            });
+        }
+
+        // No trial: the account is created inactive (see db.js) and can't
+        // log in until an admin activates it after payment — so no session
+        // here, which would let an inactive account straight into the app.
         res.status(201).json({
             ...user,
+            logged_in: false,
             message: "Compte cree. Effectue le paiement de l'abonnement (voir instructions) puis envoie la preuve a l'administrateur pour qu'il active ton compte."
         });
     } catch (err) { handleError(res, err); }
@@ -263,18 +275,27 @@ app.post('/api/auth/login', authLimiter, (req, res) => {
         if (accessError) throw new AuthError(accessError);
 
         db.clearFailedLogins(user.id, req.ip);
-        const { token, expires_at } = db.createSession(user.id);
-        setSessionCookie(res, token, expires_at);
-        const body = { id: user.id, name: user.name, phone: user.phone, is_admin: !!user.is_admin, subscription_expires_at: user.subscription_expires_at };
-        // Only the native app needs the raw token (it can't use the cookie
-        // cross-origin — see the CORS comment above). Putting it in the JSON
-        // body for every client, including the web version, would defeat
-        // the httpOnly cookie's whole point there: an XSS on the web page
-        // could then just read the token straight out of the response.
-        if (req.headers.origin === NATIVE_APP_ORIGIN) body.token = token;
-        res.json(body);
+        res.json(openSession(req, res, user));
     } catch (err) { handleError(res, err); }
 });
+
+// Creates the session (cookie for the web) and returns the body sent back
+// on login — and on sign-up when the free trial lets the account straight in.
+function openSession(req, res, user) {
+    const { token, expires_at } = db.createSession(user.id);
+    setSessionCookie(res, token, expires_at);
+    const body = {
+        id: user.id, name: user.name, phone: user.phone, is_admin: !!user.is_admin,
+        is_trial: user.is_trial ? 1 : 0, subscription_expires_at: user.subscription_expires_at
+    };
+    // Only the native app needs the raw token (it can't use the cookie
+    // cross-origin — see the CORS comment above). Putting it in the JSON
+    // body for every client, including the web version, would defeat
+    // the httpOnly cookie's whole point there: an XSS on the web page
+    // could then just read the token straight out of the response.
+    if (req.headers.origin === NATIVE_APP_ORIGIN) body.token = token;
+    return body;
+}
 
 app.post('/api/auth/logout', (req, res) => {
     const token = getTokenFromRequest(req);

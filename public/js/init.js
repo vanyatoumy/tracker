@@ -33,8 +33,19 @@ if (rememberedPhone) document.querySelector('#loginForm input[name="phone"]').va
 (async function loadAuthPrice() {
   try {
     const info = await api('/api/subscription/info');
-    if (!info.price) return;
+    const trialDays = info.trial_days || 0;
     const el = document.getElementById('authPrice');
+    // Free trial on: lead with it — it's the strongest reason to sign up.
+    if (trialDays > 0) {
+      const trialLabel = trialDays % 30 === 0 ? `${trialDays / 30} mois gratuit${trialDays > 30 ? 's' : ''}` : `${trialDays} jours gratuits`;
+      el.innerHTML = `<strong>${escapeHtml(trialLabel)}</strong>Sans paiement, sans engagement.${info.price ? ` Ensuite : ${escapeHtml(info.price)}.` : ''}`;
+      el.classList.remove('hidden');
+      document.getElementById('authSteps').innerHTML =
+        `<li>Cree ton compte en 30 secondes</li><li>Utilise SuiviPro gratuitement pendant ${trialDays} jours</li><li>Abonne-toi seulement si l'outil t'aide</li>`;
+      document.getElementById('registerSubmitBtn').textContent = `Creer mon compte — ${trialLabel}`;
+      return;
+    }
+    if (!info.price) return;
     el.innerHTML = `<strong>${escapeHtml(info.price)}</strong>Acces complet pendant ${escapeHtml(String(info.duration_days))} jours, sans engagement.`;
     el.classList.remove('hidden');
   } catch { /* optional — the pitch reads fine without a price */ }

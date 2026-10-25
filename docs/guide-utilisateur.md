@@ -14,12 +14,20 @@ l'abonnement et les étapes pour démarrer) à côté de deux onglets :
 - **Créer un compte** : nom complet, numéro, mot de passe (6 caractères
   minimum).
 
-Un nouveau compte est créé **inactif** : règle l'abonnement (instructions
-dans **"⋮" → "Mon abonnement"** ou auprès de ton administrateur), puis
-l'administrateur active ton compte. Chaque activation donne accès pour une
-durée fixe (30 jours par défaut).
+**Essai gratuit** : à l'inscription, ton compte est **actif tout de suite
+pendant 1 mois**, sans paiement et sans attendre l'administrateur — tu es
+connecté directement. Le nombre de jours d'essai restants s'affiche en haut
+de l'écran, et **"⋮" → "Mon abonnement"** indique comment t'abonner pour
+continuer ensuite.
 
-Quand l'abonnement expire, tu as **3 jours de grâce** : ton compte reste
+Pour t'abonner (ou te réabonner), règle l'abonnement selon les instructions
+de **"Mon abonnement"**, puis l'administrateur active ton compte. Chaque
+activation donne accès pour une durée fixe (30 jours par défaut).
+
+(Si l'administrateur a désactivé l'essai gratuit, un nouveau compte est
+créé inactif et doit être activé après paiement.)
+
+Quand l'abonnement (ou l'essai gratuit) expire, tu as **3 jours de grâce** : ton compte reste
 consultable en **lecture seule**, avec un bandeau rouge et un bouton
 "Comment renouveler". Sur l'app mobile, ce que tu modifies hors ligne
 pendant ces jours est gardé en attente et synchronisé dès le
@@ -274,7 +282,9 @@ paiement) et trois listes à traiter :
 
 - **Expirent bientôt** et **Expirés récemment** : bouton **"Relancer"** qui
   ouvre WhatsApp avec un message prêt (date d'expiration, prix et
-  instructions de paiement configurés dans `.env`).
+  instructions de paiement configurés dans `.env`). Les comptes en **essai
+  gratuit** portent l'étiquette "Essai gratuit" et reçoivent un message
+  d'invitation à s'abonner plutôt qu'un rappel de renouvellement.
 - **Inscrits, en attente de paiement** (inscrits ces 30 derniers jours,
   jamais activés) : bouton **"Envoyer les instructions"**.
 - Chaque relance est notée ("Relancé il y a 2 jours") pour ne pas relancer
