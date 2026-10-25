@@ -33,7 +33,7 @@ const SOURCE_LABELS = {
 // Sent with feedback so a reported problem can be tied to a release. Keep
 // in step with versionName in android/app/build.gradle (see the release
 // steps in public/downloads/README.md).
-const APP_VERSION = '1.2';
+const APP_VERSION = '1.3';
 
 let currentProspects = [];
 let activeProspectId = null;
